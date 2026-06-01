@@ -36,10 +36,14 @@ import argparse
 import datetime as _dt
 import json
 import os
+import subprocess
 import sys
+import tempfile
 
 import markdown
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "..", "etc", "config.json")
@@ -105,6 +109,9 @@ class Trilium:
         self.cfg = cfg
         self.s = requests.Session()
         self.s.headers["Authorization"] = cfg["token"]
+        retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504])
+        self.s.mount("http://", HTTPAdapter(max_retries=retry))
+        self.s.mount("https://", HTTPAdapter(max_retries=retry))
 
     def _req(self, method, path, **kw):
         try:
@@ -224,9 +231,18 @@ class Trilium:
         return nid
 
     def ensure_date_path(self, date):
-        """Find-or-create year/month/day; return the day note id."""
-        root = self.calendar_root()
-        year = self.ensure_year(root, date)
+        """Find-or-create year/month/day; return the day note id.
+
+        Uses ETAPI calendar day endpoint when calendarRootId is configured,
+        falls back to manual label-based navigation otherwise.
+        """
+        root_id = self.cfg.get("calendarRootId")
+        if root_id:
+            # Use ETAPI's built-in calendar endpoint for direct day note access
+            return self._req("GET", f"/calendar/days/{date.isoformat()}").json()[
+                "noteId"
+            ]
+        year = self.ensure_year(self.calendar_root(), date)
         month = self.ensure_month(year, date)
         return self.ensure_day(month, date)
 
@@ -271,19 +287,44 @@ def cmd_check(args):
     print("✓ Trilium 可达: {} (v{})".format(cfg["server"], info.get("appVersion")))
     root = t.calendar_root()
     print(f"✓ token 有效，日历根 = {root}")
+    # Verify the root note actually has #calendarRoot
+    root_note = t.get_note(root)
+    has_calendar_root = any(
+        a["name"] == "calendarRoot" for a in root_note.get("attributes", [])
+    )
+    if has_calendar_root:
+        print("✓ 日历根笔记验证通过（#calendarRoot 标签存在）")
+    else:
+        print("⚠️  日历根笔记缺少 #calendarRoot 标签，日历功能可能异常")
+
+
+def _read_content(content_file):
+    """Read markdown content from file, stdin (pipe), or $EDITOR."""
+    if content_file:
+        with open(content_file, encoding="utf-8") as f:
+            md = f.read()
+    elif not sys.stdin.isatty():
+        md = sys.stdin.read()
+    else:
+        # No content provided and stdin is a terminal — open $EDITOR
+        editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "vi"))
+        fd, tmp = tempfile.mkstemp(suffix=".md")
+        try:
+            os.close(fd)
+            subprocess.call([editor, tmp])
+            with open(tmp, encoding="utf-8") as f:
+                md = f.read()
+        finally:
+            os.unlink(tmp)
+    if not md.strip():
+        die("内容为空：用 --content-file 指定 md 文件，或通过 stdin 传入")
+    return md
 
 
 def cmd_add(args):
     cfg = load_config()
     t = Trilium(cfg)
-
-    if args.content_file:
-        with open(args.content_file, encoding="utf-8") as f:
-            md = f.read()
-    else:
-        md = sys.stdin.read()
-    if not md.strip():
-        die("内容为空：用 --content-file 指定 md 文件，或通过 stdin 传入")
+    md = _read_content(args.content_file)
 
     date = parse_date(args.date)
     day_id = t.ensure_date_path(date)
@@ -322,6 +363,22 @@ def cmd_list(args):
     )
     if not rows:
         print("(没有匹配的日记条目)")
+        return
+    if getattr(args, "format", "text") == "json":
+        items = []
+        for n in rows:
+            sd = next(
+                (
+                    a["value"]
+                    for a in n.get("attributes", [])
+                    if a["name"] == "diaryDate"
+                ),
+                "",
+            )
+            items.append(
+                {"noteId": n.get("noteId"), "title": n.get("title"), "date": sd}
+            )
+        print(json.dumps(items, ensure_ascii=False, indent=2))
         return
     for n in rows:
         sd = next(
@@ -395,7 +452,7 @@ def cmd_update(args):
         t.update_note(args.note_id, title=new_title)
         title_changed = True
 
-    # Update content if --content-file provided
+    # Update content if --content-file provided or stdin piped
     if args.content_file:
         with open(args.content_file, encoding="utf-8") as f:
             md = f.read()
@@ -403,6 +460,11 @@ def cmd_update(args):
             die("内容为空")
         html = render_markdown(md)
         t.update_note_content(args.note_id, html)
+    elif not sys.stdin.isatty():
+        md = sys.stdin.read()
+        if md.strip():
+            html = render_markdown(md)
+            t.update_note_content(args.note_id, html)
 
     # Update type label if --type provided
     if args.type is not None:
@@ -445,6 +507,12 @@ def build_parser():
     pl = sub.add_parser("list", help="列出日记条目")
     pl.add_argument("--date", help="只列某天 YYYY-MM-DD")
     pl.add_argument("--limit", type=int, default=50, help="最多条数，默认 50")
+    pl.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="输出格式，默认 text",
+    )
 
     pd = sub.add_parser("delete", help="删除一条日记条目")
     pd.add_argument("note_id", help="要删除的笔记 ID")

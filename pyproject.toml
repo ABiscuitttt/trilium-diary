@@ -1,6 +1,6 @@
 [project]
 name = "trilium-diary"
-version = "0.1.0"
+version = "0.3.0"
 description = "把开发日记（踩坑、里程碑、决策、学习）写入 Trilium Notes 日历面板"
 requires-python = ">=3.12"
 dependencies = [

@@ -24,17 +24,38 @@ cp etc/config.example.json etc/config.json
 ## 使用
 
 ```bash
-# 检查连通性
+# 检查连通性（含日历根标签验证）
 ./scripts/trilium.py check
 
-# 写入一条日记
-./scripts/trilium.py add --type work --title "联调通过" <<< '## 背景\n...\n## 结果\n...'
+# 写入一条日记（stdin）
+echo '## 背景\n...\n## 结果\n...' | \
+  ./scripts/trilium.py add --type work --title "联调通过"
 
-# 列出日记
+# 写入一条日记（交互式编辑器）
+./scripts/trilium.py add --type learn --title "学会了 retry 机制"
+
+# 列出日记（文本格式）
 ./scripts/trilium.py list --date 2026-05-29
+
+# 列出日记（JSON 格式）
+./scripts/trilium.py list --format json
+
+# 修改内容（stdin 管道）
+echo 'new content' | ./scripts/trilium.py update <noteId>
+
+# 修改内容（文件）
+./scripts/trilium.py update <noteId> --content-file /tmp/new.md
 ```
 
 `--type` 选项：`trap`（踩坑）、`work`（工作）、`decision`（决策）、`learn`（学习）。
+
+## 功能特性
+
+- **网络重试**：自动对 502/503/504 错误重试 3 次，指数退避
+- **ETAPI 日历端点**：配置 `calendarRootId` 后直接使用 `/calendar/days/{date}` API
+- **交互式编辑**：`add` 不传内容时自动打开 `$EDITOR`
+- **JSON 输出**：`list --format json` 便于程序化处理
+- **增强校验**：`check` 验证日历根笔记的 `#calendarRoot` 标签
 
 ## 依赖
 
