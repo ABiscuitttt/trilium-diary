@@ -48,6 +48,18 @@ from urllib3.util.retry import Retry
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "..", "etc", "config.json")
 
+
+def _get_version():
+    """Read version from pyproject.toml (works with uv run and direct execution)."""
+    import tomllib
+
+    pyproject = os.path.join(HERE, "..", "pyproject.toml")
+    try:
+        with open(pyproject, "rb") as f:
+            return tomllib.load(f)["project"]["version"]
+    except (FileNotFoundError, KeyError):
+        return "unknown"
+
 # Boxicons class for each diary type, applied via #iconClass label.
 # Trilium natively renders #iconClass in the note tree and calendar view.
 # See https://boxicons.com/ for the full icon set.
@@ -490,6 +502,7 @@ def build_parser():
     p = argparse.ArgumentParser(
         prog="trilium.py", description="把工作日记写入 Trilium 日历"
     )
+    p.add_argument("--version", action="version", version=f"%(prog)s {_get_version()}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("check", help="检查服务器、token、日历根")

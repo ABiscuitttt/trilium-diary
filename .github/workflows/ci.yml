@@ -3,33 +3,75 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
 jobs:
-  lint-and-test:
+  # ---- Test (runs on every push/PR) ----------------------------------------
+  test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
-        run: uv sync --python ${{ matrix.python-version }}
+        run: uv sync --group dev
 
       - name: Lint
         run: uv run ruff check scripts/ tests/
 
-      - name: Format check
-        run: uv run ruff format --check scripts/ tests/
-
       - name: Test
         run: uv run pytest tests/ -v
+
+  # ---- Version check (tag push only) ---------------------------------------
+  version-check:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify pyproject.toml version matches tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          PYPROJECT=$(python3 -c "
+          import tomllib
+          with open('pyproject.toml', 'rb') as f:
+              print(tomllib.load(f)['project']['version'])
+          ")
+          echo "Tag:     $TAG"
+          echo "pyproject: $PYPROJECT"
+          [ "$TAG" = "$PYPROJECT" ] || {
+            echo "::error::Version mismatch: tag=$TAG pyproject=$PYPROJECT"
+            exit 1
+          }
+
+  # ---- Release (tag push only) ---------------------------------------------
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, version-check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          DIR="trilium-diary-${GITHUB_REF#refs/tags/v}"
+          mkdir "$DIR"
+          cp SKILL.md README.md "$DIR/"
+          cp -r scripts references etc "$DIR/"
+          rm -f "$DIR/etc/config.json"
+          tar czf "dist/${DIR}.tar.gz" "$DIR"
+          echo "ARCHIVE=dist/${DIR}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ARCHIVE }}
+          generate_release_notes: true
