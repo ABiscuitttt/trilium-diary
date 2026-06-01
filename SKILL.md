@@ -47,6 +47,8 @@ fi
 
 ## 工作流程
 
+### 写入
+
 1. **起草** markdown，结构建议：
    - 踩坑：现象 → 原因 → 解决
    - 工作：背景 → 做了什么 → 结果
@@ -54,6 +56,24 @@ fi
 2. **展示确认**：草稿 + `类型 + 标题` 给用户看，**确认后才写**
 3. **写入**：调 `add` 命令，含代码块用 `--content-file`
 4. **回报**：贴出标题、日期和打开链接
+
+### 查看
+
+1. 用户想看某条日记详情时，用 `get` 命令
+2. 加 `--content` 同时显示正文内容
+3. 如果用户不知道 noteId，先用 `list --date` 查找
+
+### 修改
+
+1. 用户说"改一下""更新"时触发
+2. 用 `update` 命令，按需传 `--title`、`--type`、`--content-file`
+3. 修改类型时自动更新标题前缀 emoji
+
+### 删除
+
+1. 用户说"删掉""不要了"时触发
+2. **先展示**即将删除的条目信息（标题、类型、日期），**确认后再删**
+3. 调 `delete` 命令
 
 ## 命令
 
@@ -70,6 +90,18 @@ echo '## 现象\n...\n## 解决\n...' | \
 # 写入（文件，含代码块时推荐）
 ./scripts/trilium.py add --type work --title "联调通过" \
   --date 2026-05-28 --content-file /tmp/note.md
+
+# 查看详情
+./scripts/trilium.py get <noteId>              # 元数据
+./scripts/trilium.py get <noteId> --content    # 含内容
+
+# 修改
+./scripts/trilium.py update <noteId> --title "新标题"
+./scripts/trilium.py update <noteId> --type work
+./scripts/trilium.py update <noteId> --content-file /tmp/new.md
+
+# 删除
+./scripts/trilium.py delete <noteId>
 
 # 列出
 ./scripts/trilium.py list

@@ -1,2 +1,10 @@
 # 凭证文件
 etc/config.json
+
+# uv
+.python-version
+uv.lock
+
+# 测试 / 缓存
+.pytest_cache/
+__pycache__/

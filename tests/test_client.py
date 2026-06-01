@@ -1,0 +1,711 @@
+"""Tests for Trilium client with mocked HTTP, and command-level integration tests."""
+
+import datetime as _dt
+import json
+import os
+import sys
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+
+from trilium import (
+    Trilium,
+    cmd_add,
+    cmd_check,
+    cmd_delete,
+    cmd_get,
+    cmd_list,
+    cmd_update,
+    load_config,
+)
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_config(tmp_path, **overrides):
+    """Write a minimal config.json and return its path."""
+    cfg = {
+        "server": "http://localhost:8080",
+        "token": "test-token",
+        "calendarRootId": "root123",
+    }
+    cfg.update(overrides)
+    p = tmp_path / "etc" / "config.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(cfg), encoding="utf-8")
+    return str(p)
+
+
+def _mock_response(status_code=200, json_data=None, text=""):
+    r = MagicMock()
+    r.status_code = status_code
+    r.text = text
+    r.json.return_value = json_data or {}
+    return r
+
+
+# ---------------------------------------------------------------------------
+# Trilium client unit tests (mocked HTTP)
+# ---------------------------------------------------------------------------
+class TestTriliumClient:
+    def _client(self, cfg=None):
+        if cfg is None:
+            cfg = {
+                "server": "http://localhost:8080",
+                "token": "tok",
+                "calendarRootId": "root1",
+            }
+        return Trilium(cfg)
+
+    def test_calendar_root_from_config(self):
+        t = self._client({"server": "http://x", "token": "t", "calendarRootId": "abc"})
+        assert t.calendar_root() == "abc"
+
+    def test_calendar_root_auto_detect_single(self):
+        t = self._client({"server": "http://x", "token": "t", "calendarRootId": ""})
+        with patch.object(
+            t, "search", return_value=[{"noteId": "cal1", "title": "Journal"}]
+        ):
+            assert t.calendar_root() == "cal1"
+
+    def test_calendar_root_auto_detect_none_exits(self):
+        t = self._client({"server": "http://x", "token": "t", "calendarRootId": ""})
+        with patch.object(t, "search", return_value=[]), pytest.raises(SystemExit):
+            t.calendar_root()
+
+    def test_calendar_root_auto_detect_multiple_exits(self):
+        t = self._client({"server": "http://x", "token": "t", "calendarRootId": ""})
+        with (
+            patch.object(
+                t,
+                "search",
+                return_value=[
+                    {"noteId": "a", "title": "J1"},
+                    {"noteId": "b", "title": "J2"},
+                ],
+            ),
+            pytest.raises(SystemExit),
+        ):
+            t.calendar_root()
+
+    def test_ensure_year_existing(self):
+        t = self._client()
+        with patch.object(t, "_child_with_label", return_value="y2026"):
+            assert t.ensure_year("root", _dt.date(2026, 6, 1)) == "y2026"
+
+    def test_ensure_year_creates(self):
+        t = self._client()
+        with (
+            patch.object(t, "_child_with_label", return_value=None),
+            patch.object(
+                t, "create_note", return_value={"note": {"noteId": "new2026"}}
+            ),
+            patch.object(t, "add_label"),
+        ):
+            assert t.ensure_year("root", _dt.date(2026, 6, 1)) == "new2026"
+
+    def test_ensure_month_existing(self):
+        t = self._client()
+        with patch.object(t, "_child_with_label", return_value="m05"):
+            assert t.ensure_month("y2026", _dt.date(2026, 5, 15)) == "m05"
+
+    def test_ensure_month_creates(self):
+        t = self._client()
+        with (
+            patch.object(t, "_child_with_label", return_value=None),
+            patch.object(t, "create_note", return_value={"note": {"noteId": "new05"}}),
+            patch.object(t, "add_label"),
+        ):
+            assert t.ensure_month("y2026", _dt.date(2026, 5, 15)) == "new05"
+
+    def test_ensure_day_existing(self):
+        t = self._client()
+        with patch.object(t, "_child_with_label", return_value="d15"):
+            assert t.ensure_day("m05", _dt.date(2026, 5, 15)) == "d15"
+
+    def test_ensure_day_creates(self):
+        t = self._client()
+        with (
+            patch.object(t, "_child_with_label", return_value=None),
+            patch.object(t, "create_note", return_value={"note": {"noteId": "new15"}}),
+            patch.object(t, "add_label"),
+        ):
+            assert t.ensure_day("m05", _dt.date(2026, 5, 15)) == "new15"
+
+    def test_ensure_date_path_chains(self):
+        """ensure_date_path calls root -> year -> month -> day in sequence."""
+        t = self._client()
+        with (
+            patch.object(t, "calendar_root", return_value="r"),
+            patch.object(t, "ensure_year", return_value="y"),
+            patch.object(t, "ensure_month", return_value="m"),
+            patch.object(t, "ensure_day", return_value="d"),
+        ):
+            assert t.ensure_date_path(_dt.date(2026, 6, 1)) == "d"
+
+    def test__req_401_exits(self):
+        t = self._client()
+        with (
+            patch.object(t.s, "request", return_value=_mock_response(401)),
+            pytest.raises(SystemExit),
+        ):
+            t._req("GET", "/test")
+
+    def test__req_500_exits(self):
+        t = self._client()
+        with (
+            patch.object(t.s, "request", return_value=_mock_response(500, text="err")),
+            pytest.raises(SystemExit),
+        ):
+            t._req("GET", "/test")
+
+    def test__req_connection_error_exits(self):
+        import requests as _req
+
+        t = self._client()
+        with (
+            patch.object(t.s, "request", side_effect=_req.ConnectionError("fail")),
+            pytest.raises(SystemExit),
+        ):
+            t._req("GET", "/test")
+
+    def test_get_note(self):
+        t = self._client()
+        with patch.object(
+            t,
+            "_req",
+            return_value=MagicMock(json=lambda: {"noteId": "n1", "title": "T"}),
+        ):
+            result = t.get_note("n1")
+            assert result["noteId"] == "n1"
+
+    def test_delete_note(self):
+        t = self._client()
+        with patch.object(t, "_req", return_value=MagicMock()):
+            t.delete_note("n1")
+            t._req.assert_called_with("DELETE", "/notes/n1")
+
+    def test_get_note_content(self):
+        t = self._client()
+        mock_resp = MagicMock()
+        mock_resp.text = "<p>hello</p>"
+        with patch.object(t, "_req", return_value=mock_resp):
+            content = t.get_note_content("n1")
+            assert content == "<p>hello</p>"
+            t._req.assert_called_with("GET", "/notes/n1/content")
+
+    def test_update_note_content(self):
+        t = self._client()
+        with patch.object(t, "_req", return_value=MagicMock()):
+            t.update_note_content("n1", "<p>new</p>")
+            t._req.assert_called_once()
+            call_args = t._req.call_args
+            assert call_args[0] == ("PUT", "/notes/n1/content")
+
+    def test_update_note(self):
+        t = self._client()
+        with patch.object(
+            t, "_req", return_value=MagicMock(json=lambda: {"noteId": "n1"})
+        ):
+            t.update_note("n1", title="new title")
+            t._req.assert_called_with("PATCH", "/notes/n1", json={"title": "new title"})
+
+    def test_patch_attribute(self):
+        t = self._client()
+        with patch.object(
+            t, "_req", return_value=MagicMock(json=lambda: {"attributeId": "a1"})
+        ):
+            t.patch_attribute("a1", value="newval")
+            t._req.assert_called_with(
+                "PATCH", "/attributes/a1", json={"value": "newval"}
+            )
+
+    def test_delete_attribute(self):
+        t = self._client()
+        with patch.object(t, "_req", return_value=MagicMock()):
+            t.delete_attribute("a1")
+            t._req.assert_called_with("DELETE", "/attributes/a1")
+
+
+# ---------------------------------------------------------------------------
+# Command-level integration tests (mocked Trilium + config)
+# ---------------------------------------------------------------------------
+class TestCmdCheck:
+    def test_check_success(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.app_info.return_value = {"appVersion": "0.63.0"}
+            inst.calendar_root.return_value = "abc"
+            args = MagicMock(cmd="check")
+            cmd_check(args)
+            out = capsys.readouterr().out
+            assert "✓" in out
+            assert "0.63.0" in out
+
+
+class TestCmdAdd:
+    def test_add_from_file(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        content_file = tmp_path / "note.md"
+        content_file.write_text("## Hello\nworld", encoding="utf-8")
+
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.ensure_date_path.return_value = "day123"
+            inst.create_note.return_value = {"note": {"noteId": "note456"}}
+            inst.add_label.return_value = {}
+
+            args = MagicMock(
+                cmd="add",
+                type="trap",
+                title="test bug",
+                date="2026-06-01",
+                content_file=str(content_file),
+                prefix=None,
+            )
+            cmd_add(args)
+            out = capsys.readouterr().out
+            assert "🪤 · test bug" in out
+            assert "2026-06-01" in out
+            # Verify labels were added
+            assert inst.add_label.call_count == 3
+
+    def test_add_empty_content_exits(self, tmp_path):
+        config_path = _make_config(tmp_path)
+        content_file = tmp_path / "empty.md"
+        content_file.write_text("   \n  ", encoding="utf-8")
+
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium"),
+        ):
+            args = MagicMock(
+                cmd="add",
+                type="work",
+                title="t",
+                date=None,
+                content_file=str(content_file),
+                prefix=None,
+            )
+            with pytest.raises(SystemExit):
+                cmd_add(args)
+
+    def test_add_stdin(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+            patch("sys.stdin") as mock_stdin,
+        ):
+            mock_stdin.read.return_value = "body content"
+            inst = MockTril.return_value
+            inst.ensure_date_path.return_value = "day1"
+            inst.create_note.return_value = {"note": {"noteId": "n1"}}
+            inst.add_label.return_value = {}
+
+            args = MagicMock(
+                cmd="add",
+                type="learn",
+                title="insight",
+                date=None,
+                content_file=None,
+                prefix=None,
+            )
+            cmd_add(args)
+            out = capsys.readouterr().out
+            assert "💡 · insight" in out
+
+    def test_add_with_custom_prefix(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        content_file = tmp_path / "note.md"
+        content_file.write_text("content", encoding="utf-8")
+
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.ensure_date_path.return_value = "d1"
+            inst.create_note.return_value = {"note": {"noteId": "n1"}}
+            inst.add_label.return_value = {}
+
+            args = MagicMock(
+                cmd="add",
+                type="trap",
+                title="t",
+                date="2026-06-01",
+                content_file=str(content_file),
+                prefix="🔥",
+            )
+            cmd_add(args)
+            out = capsys.readouterr().out
+            assert "🔥 · t" in out
+
+    def test_add_no_prefix(self, tmp_path, capsys):
+        """Custom type without prefix override → no emoji prefix."""
+        config_path = _make_config(tmp_path)
+        content_file = tmp_path / "note.md"
+        content_file.write_text("content", encoding="utf-8")
+
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.ensure_date_path.return_value = "d1"
+            inst.create_note.return_value = {"note": {"noteId": "n1"}}
+            inst.add_label.return_value = {}
+
+            args = MagicMock(
+                cmd="add",
+                type="custom",
+                title="raw title",
+                date="2026-06-01",
+                content_file=str(content_file),
+                prefix=None,
+            )
+            cmd_add(args)
+            out = capsys.readouterr().out
+            assert "raw title" in out
+            assert "·" not in out
+
+
+class TestCmdList:
+    def test_list_with_results(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.search.return_value = [
+                {
+                    "noteId": "n1",
+                    "title": "🪤 · bug",
+                    "attributes": [{"name": "diaryDate", "value": "2026-06-01"}],
+                },
+            ]
+            args = MagicMock(cmd="list", date="2026-06-01", limit=50)
+            cmd_list(args)
+            out = capsys.readouterr().out
+            assert "🪤 · bug" in out
+            assert "2026-06-01" in out
+
+    def test_list_empty(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.search.return_value = []
+            args = MagicMock(cmd="list", date=None, limit=50)
+            cmd_list(args)
+            out = capsys.readouterr().out
+            assert "没有" in out
+
+
+# ---------------------------------------------------------------------------
+# load_config
+# ---------------------------------------------------------------------------
+class TestLoadConfig:
+    def test_missing_config_exits(self):
+        with (
+            patch("trilium.CONFIG_PATH", "/nonexistent/path.json"),
+            pytest.raises(SystemExit),
+        ):
+            load_config()
+
+    def test_loads_valid_config(self, tmp_path):
+        cfg = {"server": "http://myserver", "token": "abc", "calendarRootId": "id1"}
+        p = tmp_path / "config.json"
+        p.write_text(json.dumps(cfg), encoding="utf-8")
+
+        with patch("trilium.CONFIG_PATH", str(p)):
+            result = load_config()
+        assert result["server"] == "http://myserver"
+        assert result["token"] == "abc"
+        assert result["calendarRootId"] == "id1"
+
+    def test_missing_token_exits(self, tmp_path):
+        cfg = {"server": "http://x"}
+        p = tmp_path / "config.json"
+        p.write_text(json.dumps(cfg), encoding="utf-8")
+
+        with patch("trilium.CONFIG_PATH", str(p)), pytest.raises(SystemExit):
+            load_config()
+
+    def test_server_trailing_slash_stripped(self, tmp_path):
+        cfg = {"server": "http://x/", "token": "t"}
+        p = tmp_path / "config.json"
+        p.write_text(json.dumps(cfg), encoding="utf-8")
+
+        with patch("trilium.CONFIG_PATH", str(p)):
+            result = load_config()
+        assert result["server"] == "http://x"
+
+    def test_default_server_and_calendar_root(self, tmp_path):
+        cfg = {"token": "t"}
+        p = tmp_path / "config.json"
+        p.write_text(json.dumps(cfg), encoding="utf-8")
+
+        with patch("trilium.CONFIG_PATH", str(p)):
+            result = load_config()
+        assert result["server"] == "http://trilium.localhost"
+        assert result["calendarRootId"] == ""
+
+
+class TestCmdDelete:
+    def test_delete_success(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.get_note.return_value = {
+                "noteId": "abc123",
+                "title": "🪤 · some bug",
+                "attributes": [
+                    {"name": "diaryType", "value": "trap"},
+                    {"name": "diaryDate", "value": "2026-06-01"},
+                ],
+            }
+            inst.delete_note.return_value = MagicMock()
+
+            args = MagicMock(cmd="delete", note_id="abc123")
+            cmd_delete(args)
+            out = capsys.readouterr().out
+            assert "🪤 · some bug" in out
+            assert "trap" in out
+            assert "2026-06-01" in out
+            assert "✓ 已删除" in out
+            inst.delete_note.assert_called_once_with("abc123")
+
+    def test_delete_no_diary_labels(self, tmp_path, capsys):
+        """Delete a note without diary labels still works."""
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.get_note.return_value = {
+                "noteId": "xyz",
+                "title": "plain note",
+                "attributes": [],
+            }
+            inst.delete_note.return_value = MagicMock()
+
+            args = MagicMock(cmd="delete", note_id="xyz")
+            cmd_delete(args)
+            out = capsys.readouterr().out
+            assert "plain note" in out
+            assert "✓ 已删除" in out
+
+
+class TestCmdGet:
+    def test_get_shows_metadata(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.get_note.return_value = {
+                "noteId": "n1",
+                "title": "🪤 · bug fix",
+                "attributes": [
+                    {"name": "diaryType", "value": "trap"},
+                    {"name": "diaryDate", "value": "2026-06-01"},
+                ],
+            }
+
+            args = MagicMock(note_id="n1", content=False)
+            cmd_get(args)
+            out = capsys.readouterr().out
+            assert "🪤 · bug fix" in out
+            assert "trap" in out
+            assert "2026-06-01" in out
+            assert "n1" in out
+            # content not fetched without --content
+            inst.get_note_content.assert_not_called()
+
+    def test_get_with_content(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.get_note.return_value = {
+                "noteId": "n1",
+                "title": "📦 · release",
+                "attributes": [
+                    {"name": "diaryType", "value": "work"},
+                    {"name": "diaryDate", "value": "2026-05-28"},
+                ],
+            }
+            inst.get_note_content.return_value = "<p>release notes</p>"
+
+            args = MagicMock(note_id="n1", content=True)
+            cmd_get(args)
+            out = capsys.readouterr().out
+            assert "---" in out
+            assert "release notes" in out
+            inst.get_note_content.assert_called_once_with("n1")
+
+    def test_get_no_diary_labels(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.get_note.return_value = {
+                "noteId": "n2",
+                "title": "plain note",
+                "attributes": [],
+            }
+
+            args = MagicMock(note_id="n2", content=False)
+            cmd_get(args)
+            out = capsys.readouterr().out
+            assert "plain note" in out
+            assert "n2" in out
+
+
+class TestCmdUpdate:
+    def test_update_title(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.get_note.return_value = {
+                "noteId": "n1",
+                "title": "🪤 · old bug",
+                "attributes": [
+                    {"name": "diaryType", "value": "trap", "attributeId": "at1"},
+                    {"name": "diaryDate", "value": "2026-06-01"},
+                ],
+            }
+
+            args = MagicMock(
+                note_id="n1", title="new bug", type=None, content_file=None, prefix=None
+            )
+            cmd_update(args)
+            out = capsys.readouterr().out
+            assert "✓ 已更新" in out
+            inst.update_note.assert_called_with("n1", title="🪤 · new bug")
+
+    def test_update_type(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.get_note.return_value = {
+                "noteId": "n1",
+                "title": "🪤 · some bug",
+                "attributes": [
+                    {"name": "diaryType", "value": "trap", "attributeId": "at1"},
+                ],
+            }
+
+            args = MagicMock(
+                note_id="n1", title=None, type="work", content_file=None, prefix=None
+            )
+            cmd_update(args)
+            inst.patch_attribute.assert_called_with("at1", value="work")
+            inst.update_note.assert_called_with("n1", title="📦 · some bug")
+
+    def test_update_content(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        content_file = tmp_path / "new.md"
+        content_file.write_text("## Updated\nnew content", encoding="utf-8")
+
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.get_note.return_value = {
+                "noteId": "n1",
+                "title": "🪤 · bug",
+                "attributes": [],
+            }
+
+            args = MagicMock(
+                note_id="n1",
+                title=None,
+                type=None,
+                content_file=str(content_file),
+                prefix=None,
+            )
+            cmd_update(args)
+            inst.update_note_content.assert_called_once()
+            call_content = inst.update_note_content.call_args[0][1]
+            assert "Updated" in call_content
+
+    def test_update_content_empty_exits(self, tmp_path):
+        config_path = _make_config(tmp_path)
+        content_file = tmp_path / "empty.md"
+        content_file.write_text("   ", encoding="utf-8")
+
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.get_note.return_value = {
+                "noteId": "n1",
+                "title": "t",
+                "attributes": [],
+            }
+
+            args = MagicMock(
+                note_id="n1",
+                title=None,
+                type=None,
+                content_file=str(content_file),
+                prefix=None,
+            )
+            with pytest.raises(SystemExit):
+                cmd_update(args)
+
+    def test_update_nothing(self, tmp_path, capsys):
+        """update with no flags still shows the note info."""
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.get_note.return_value = {
+                "noteId": "n1",
+                "title": "🪤 · bug",
+                "attributes": [],
+            }
+
+            args = MagicMock(
+                note_id="n1", title=None, type=None, content_file=None, prefix=None
+            )
+            cmd_update(args)
+            out = capsys.readouterr().out
+            assert "✓ 已更新" in out
+            inst.update_note.assert_not_called()
