@@ -1,4 +1,4 @@
-"""Tests for pure functions: render_markdown, resolve_prefix, parse_date."""
+"""Tests for pure functions: render_markdown, resolve_icon, parse_date."""
 
 import datetime as _dt
 import os
@@ -14,12 +14,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 # The script calls sys.exit on errors via die(), which we want to catch.
 from trilium import (
     MONTH_EN,
-    TYPE_PREFIX,
+    TYPE_ICON,
     WEEKDAY_ZH,
     build_parser,
     parse_date,
     render_markdown,
-    resolve_prefix,
+    resolve_icon,
 )
 
 
@@ -86,26 +86,26 @@ class TestRenderMarkdown:
 
 
 # ---------------------------------------------------------------------------
-# resolve_prefix
+# resolve_icon
 # ---------------------------------------------------------------------------
-class TestResolvePrefix:
+class TestResolveIcon:
     def test_known_types(self):
-        assert resolve_prefix("trap", None) == "🪤"
-        assert resolve_prefix("work", None) == "📦"
-        assert resolve_prefix("decision", None) == "🚦"
-        assert resolve_prefix("learn", None) == "💡"
+        assert resolve_icon("trap", None) == "bx bx-bug-alt"
+        assert resolve_icon("work", None) == "bx bx-package"
+        assert resolve_icon("decision", None) == "bx bx-traffic-cone"
+        assert resolve_icon("learn", None) == "bx bx-bulb"
 
     def test_unknown_type_no_override(self):
-        assert resolve_prefix("custom", None) == ""
+        assert resolve_icon("custom", None) == ""
 
     def test_override_takes_precedence(self):
-        assert resolve_prefix("trap", "🔥") == "🔥"
+        assert resolve_icon("trap", "bx bx-star") == "bx bx-star"
 
     def test_override_empty_string(self):
-        assert resolve_prefix("trap", "") == ""
+        assert resolve_icon("trap", "") == ""
 
     def test_override_for_unknown_type(self):
-        assert resolve_prefix("custom", "📌") == "📌"
+        assert resolve_icon("custom", "bx bx-custom") == "bx bx-custom"
 
 
 # ---------------------------------------------------------------------------
@@ -138,10 +138,10 @@ class TestParseDate:
 # Constants sanity
 # ---------------------------------------------------------------------------
 class TestConstants:
-    def test_type_prefix_values(self):
-        assert set(TYPE_PREFIX.keys()) == {"trap", "work", "decision", "learn"}
-        for v in TYPE_PREFIX.values():
-            assert len(v) > 0
+    def test_type_icon_values(self):
+        assert set(TYPE_ICON.keys()) == {"trap", "work", "decision", "learn"}
+        for v in TYPE_ICON.values():
+            assert v.startswith("bx ")
 
     def test_weekday_zh_seven_days(self):
         assert len(WEEKDAY_ZH) == 7
