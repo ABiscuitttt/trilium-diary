@@ -137,8 +137,9 @@ class TestTriliumClient:
             assert t.ensure_day("m05", _dt.date(2026, 5, 15)) == "new15"
 
     def test_ensure_date_path_chains(self):
-        """ensure_date_path calls root -> year -> month -> day in sequence."""
-        t = self._client()
+        """ensure_date_path uses manual chain when no calendarRootId."""
+        cfg = {"server": "http://localhost:8080", "token": "test-token"}
+        t = Trilium(cfg)
         with (
             patch.object(t, "calendar_root", return_value="r"),
             patch.object(t, "ensure_year", return_value="y"),
@@ -146,6 +147,21 @@ class TestTriliumClient:
             patch.object(t, "ensure_day", return_value="d"),
         ):
             assert t.ensure_date_path(_dt.date(2026, 6, 1)) == "d"
+
+    def test_ensure_date_path_calendar_api(self):
+        """ensure_date_path uses ETAPI calendar endpoint
+        when calendarRootId is configured.
+        """
+        cfg = {
+            "server": "http://localhost:8080",
+            "token": "test-token",
+            "calendarRootId": "calRoot123",
+        }
+        t = Trilium(cfg)
+        with patch.object(t, "_req") as mock_req:
+            mock_req.return_value.json.return_value = {"noteId": "day123"}
+            assert t.ensure_date_path(_dt.date(2026, 6, 1)) == "day123"
+            mock_req.assert_called_once_with("GET", "/calendar/days/2026-06-01")
 
     def test__req_401_exits(self):
         t = self._client()
@@ -309,6 +325,7 @@ class TestCmdAdd:
             patch("trilium.Trilium") as MockTril,
             patch("sys.stdin") as mock_stdin,
         ):
+            mock_stdin.isatty.return_value = False
             mock_stdin.read.return_value = "body content"
             inst = MockTril.return_value
             inst.ensure_date_path.return_value = "day1"
@@ -593,6 +610,7 @@ class TestCmdUpdate:
         with (
             patch("trilium.CONFIG_PATH", config_path),
             patch("trilium.Trilium") as MockTril,
+            patch("sys.stdin.isatty", return_value=True),
         ):
             inst = MockTril.return_value
             inst.get_note.return_value = {
@@ -617,6 +635,7 @@ class TestCmdUpdate:
         with (
             patch("trilium.CONFIG_PATH", config_path),
             patch("trilium.Trilium") as MockTril,
+            patch("sys.stdin.isatty", return_value=True),
         ):
             inst = MockTril.return_value
             inst.get_note.return_value = {
@@ -694,6 +713,7 @@ class TestCmdUpdate:
         with (
             patch("trilium.CONFIG_PATH", config_path),
             patch("trilium.Trilium") as MockTril,
+            patch("sys.stdin.isatty", return_value=True),
         ):
             inst = MockTril.return_value
             inst.get_note.return_value = {
@@ -709,3 +729,169 @@ class TestCmdUpdate:
             out = capsys.readouterr().out
             assert "✓ 已更新" in out
             inst.update_note.assert_not_called()
+
+    def test_update_stdin_content(self, tmp_path, capsys):
+        """update reads content from stdin when no content-file and stdin is piped."""
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+            patch("sys.stdin.isatty", return_value=False),
+            patch("sys.stdin.read", return_value="## Updated via stdin"),
+        ):
+            inst = MockTril.return_value
+            inst.get_note.return_value = {
+                "noteId": "n1",
+                "title": "test",
+                "attributes": [],
+            }
+
+            args = MagicMock(
+                note_id="n1", title=None, type=None, content_file=None, prefix=None
+            )
+            cmd_update(args)
+            inst.update_note_content.assert_called_once()
+            call_content = inst.update_note_content.call_args[0][1]
+            assert "Updated via stdin" in call_content
+
+
+class TestCmdListJson:
+    def test_list_json_format(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.search.return_value = [
+                {
+                    "noteId": "n1",
+                    "title": "🪤 · bug",
+                    "attributes": [{"name": "diaryDate", "value": "2026-06-01"}],
+                },
+                {
+                    "noteId": "n2",
+                    "title": "💡 · insight",
+                    "attributes": [{"name": "diaryDate", "value": "2026-06-02"}],
+                },
+            ]
+
+            args = MagicMock(date=None, limit=50, format="json")
+            cmd_list(args)
+            out = capsys.readouterr().out
+            data = json.loads(out)
+            assert len(data) == 2
+            assert data[0]["noteId"] == "n1"
+            assert data[1]["title"] == "💡 · insight"
+
+    def test_list_text_format_default(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.search.return_value = [
+                {
+                    "noteId": "n1",
+                    "title": "🪤 · bug",
+                    "attributes": [{"name": "diaryDate", "value": "2026-06-01"}],
+                },
+            ]
+
+            args = MagicMock(date=None, limit=50, format="text")
+            cmd_list(args)
+            out = capsys.readouterr().out
+            assert "n1" in out
+            assert "🪤 · bug" in out
+            # Should NOT be JSON
+            assert not out.strip().startswith("[")
+
+
+class TestNetworkRetry:
+    def test_retry_adapter_mounted(self):
+        """Session has retry adapter mounted for http and https."""
+        cfg = {"server": "http://localhost:8080", "token": "test-token"}
+        t = Trilium(cfg)
+        adapter = t.s.get_adapter("http://localhost")
+        assert adapter is not None
+        assert adapter.max_retries.total == 3
+        adapter_https = t.s.get_adapter("https://localhost")
+        assert adapter_https is not None
+        assert adapter_https.max_retries.total == 3
+
+
+class TestCmdCheckEnhanced:
+    def test_check_validates_calendar_root_label(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.app_info.return_value = {"appVersion": "0.63.0"}
+            inst.calendar_root.return_value = "abc"
+            inst.get_note.return_value = {
+                "noteId": "abc",
+                "attributes": [{"name": "calendarRoot", "value": ""}],
+            }
+            args = MagicMock(cmd="check")
+            cmd_check(args)
+            out = capsys.readouterr().out
+            assert "#calendarRoot" in out
+            assert "验证通过" in out
+
+    def test_check_warns_missing_calendar_root_label(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+        ):
+            inst = MockTril.return_value
+            inst.app_info.return_value = {"appVersion": "0.63.0"}
+            inst.calendar_root.return_value = "abc"
+            inst.get_note.return_value = {
+                "noteId": "abc",
+                "attributes": [],
+            }
+            args = MagicMock(cmd="check")
+            cmd_check(args)
+            out = capsys.readouterr().out
+            assert "缺少" in out or "⚠" in out
+
+
+class TestCmdAddEditor:
+    def test_add_opens_editor_when_no_content(self, tmp_path, capsys):
+        config_path = _make_config(tmp_path)
+        with (
+            patch("trilium.CONFIG_PATH", config_path),
+            patch("trilium.Trilium") as MockTril,
+            patch("sys.stdin.isatty", return_value=True),
+            patch("subprocess.call") as mock_call,
+        ):
+            inst = MockTril.return_value
+            inst.ensure_date_path.return_value = "day1"
+            inst.create_note.return_value = {"note": {"noteId": "n1"}}
+            inst.add_label.return_value = {}
+
+            # Write content to the temp file that the editor would create
+            def fake_editor(cmd_args):
+                # cmd_args[1] is the temp file path
+                with open(cmd_args[1], "w", encoding="utf-8") as f:
+                    f.write("Editor content here")
+                return 0
+
+            mock_call.side_effect = fake_editor
+
+            args = MagicMock(
+                cmd="add",
+                type="work",
+                title="task",
+                date=None,
+                content_file=None,
+                prefix=None,
+            )
+            cmd_add(args)
+            out = capsys.readouterr().out
+            assert "📦 · task" in out
+            mock_call.assert_called_once()

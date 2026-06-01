@@ -80,7 +80,7 @@ fi
 ```bash
 cd "$(dirname "$SKILL_MD")"   # 按实际安装路径调整
 
-# 检查连通性
+# 检查连通性（含日历根标签验证）
 ./scripts/trilium.py check
 
 # 写入（stdin）
@@ -91,6 +91,9 @@ echo '## 现象\n...\n## 解决\n...' | \
 ./scripts/trilium.py add --type work --title "联调通过" \
   --date 2026-05-28 --content-file /tmp/note.md
 
+# 写入（交互式编辑器，不传内容时自动打开 $EDITOR）
+./scripts/trilium.py add --type learn --title "新知识"
+
 # 查看详情
 ./scripts/trilium.py get <noteId>              # 元数据
 ./scripts/trilium.py get <noteId> --content    # 含内容
@@ -99,13 +102,17 @@ echo '## 现象\n...\n## 解决\n...' | \
 ./scripts/trilium.py update <noteId> --title "新标题"
 ./scripts/trilium.py update <noteId> --type work
 ./scripts/trilium.py update <noteId> --content-file /tmp/new.md
+echo 'new content' | ./scripts/trilium.py update <noteId>  # stdin
 
 # 删除
 ./scripts/trilium.py delete <noteId>
 
-# 列出
+# 列出（文本格式）
 ./scripts/trilium.py list
 ./scripts/trilium.py list --date 2026-05-29
+
+# 列出（JSON 格式，便于程序化处理）
+./scripts/trilium.py list --format json
 ```
 
 类型映射：`trap`→🪤 `work`→📦 `decision`→🚦 `learn`→💡
@@ -113,7 +120,8 @@ echo '## 现象\n...\n## 解决\n...' | \
 
 ## 实现细节
 
-日历结构 — 幂等查找或创建，复用 Trilium 已有节点：
+日历结构 — 配置了 `calendarRootId` 时使用 ETAPI `/calendar/days/{date}` 端点
+（自动创建/查找日 note），否则退回手动幂等查找或创建：
 ```
 Journal (#calendarRoot)
  └─ 2026            #yearNote=2026
@@ -121,6 +129,8 @@ Journal (#calendarRoot)
          └─ 29 - 周五  #dateNote=2026-05-29  ← 日期笔记
              └─ 🪤 · 标题                    ← 条目（日期笔记的子笔记）
 ```
+
+网络请求自动重试 3 次（502/503/504），指数退避间隔 0.5s。
 
 条目不打 `#startDate`（否则被渲染为置顶全天事件），只打 `#diary`、`#diaryType=<type>`、`#diaryDate=YYYY-MM-DD` 用于检索。
 **前缀用 emoji 非方括号**：ICU 排序中 `[` `【` 排在数字前会导致条目浮到日期标题上方。
