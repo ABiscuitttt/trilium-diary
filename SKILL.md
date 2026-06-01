@@ -134,8 +134,8 @@ EOF
 ./scripts/trilium.py list --format json
 ```
 
-类型映射：`trap`→🪤 `work`→📦 `decision`→🚦 `learn`→💡
-其他值无前缀，可用 `--prefix` 覆盖（勿用方括号开头）。
+类型映射：`trap`→bx bx-bug-alt `work`→bx bx-package `decision`→bx bx-traffic-cone `learn`→bx bx-bulb
+图标通过 `#iconClass` 标签设置（Trilium 原生 Boxicons），可用 `--prefix` 覆盖自定义 Boxicons class。
 
 ## 实现细节
 
@@ -146,18 +146,19 @@ Journal (#calendarRoot)
  └─ 2026            #yearNote=2026
      └─ 05 - May    #monthNote=2026-05
          └─ 29 - 周五  #dateNote=2026-05-29  ← 日期笔记
-             └─ 🪤 · 标题                    ← 条目（日期笔记的子笔记）
+             └─ 标题  #iconClass="bx bx-bug-alt"  ← 条目（带图标）
 ```
 
 网络请求自动重试 3 次（502/503/504），指数退避间隔 0.5s。
 
 条目不打 `#startDate`（否则被渲染为置顶全天事件），只打 `#diary`、`#diaryType=<type>`、`#diaryDate=YYYY-MM-DD` 用于检索。
-**前缀用 emoji 非方括号**：ICU 排序中 `[` `【` 排在数字前会导致条目浮到日期标题上方。
+图标通过 `#iconClass` 标签设置（Boxicons 图标库），在笔记树和日历视图中渲染。
 
 ## 注意事项
 
 - 含反引号/代码块的内容用 heredoc（`<<'EOF'`），无需临时文件，单引号包裹 EOF 防止 shell 转义
 - markdown 本地渲染为 HTML（ETAPI 的 render-markdown 接口不认 ETAPI token）
+- 图标使用 [Boxicons](https://boxicons.com/)（`bx` 前缀），通过 `#iconClass` 标签应用
 - 日历根 id 在 `etc/config.json` 的 `calendarRootId`，留空自动探测 `#calendarRoot`
 - 凭证文件 `etc/config.json`（权限 600，已 gitignore，**切勿回显 token**）
 - 排错参考 `references/etapi.md`
