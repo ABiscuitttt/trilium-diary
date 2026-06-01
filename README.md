@@ -27,7 +27,16 @@ cp etc/config.example.json etc/config.json
 # 检查连通性（含日历根标签验证）
 ./scripts/trilium.py check
 
-# 写入一条日记（stdin）
+# 写入一条日记（heredoc stdin，推荐）
+./scripts/trilium.py add --type work --title "联调通过" <<'EOF'
+## 背景
+前后端联调完成
+
+## 结果
+所有接口跑通
+EOF
+
+# 写入一条日记（简短内容可用 echo + pipe）
 echo '## 背景\n...\n## 结果\n...' | \
   ./scripts/trilium.py add --type work --title "联调通过"
 
@@ -40,11 +49,11 @@ echo '## 背景\n...\n## 结果\n...' | \
 # 列出日记（JSON 格式）
 ./scripts/trilium.py list --format json
 
-# 修改内容（stdin 管道）
-echo 'new content' | ./scripts/trilium.py update <noteId>
-
-# 修改内容（文件）
-./scripts/trilium.py update <noteId> --content-file /tmp/new.md
+# 修改内容（heredoc stdin）
+./scripts/trilium.py update <noteId> <<'EOF'
+## 新内容
+更新后的 markdown...
+EOF
 ```
 
 `--type` 选项：`trap`（踩坑）、`work`（工作）、`decision`（决策）、`learn`（学习）。
