@@ -155,7 +155,10 @@ class Trilium:
 
     def update_note_content(self, note_id, content):
         return self._req(
-            "PUT", f"/notes/{note_id}/content", data=content.encode("utf-8")
+            "PUT",
+            f"/notes/{note_id}/content",
+            data=content.encode("utf-8"),
+            headers={"Content-Type": "text/plain; charset=utf-8"},
         )
 
     def delete_note(self, note_id):
