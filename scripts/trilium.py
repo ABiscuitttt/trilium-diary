@@ -11,7 +11,7 @@ Targets the built-in Journal/calendar (a `book` note tagged #calendarRoot):
       └─ YYYY            #yearNote=YYYY
          └─ MM - Mon     #monthNote=YYYY-MM
             └─ DD - 周X   #dateNote=YYYY-MM-DD     (day note)
-               └─ 🪤 · 标题                        (entry, child of day note)
+               └─ 标题  #iconClass="bx bx-bug-alt"     (entry, child of day note)
 
 Year/month/day nodes are found-or-created by their calendar labels (idempotent),
 so they match what Trilium itself recognizes. Entries are plain child notes of
@@ -48,17 +48,14 @@ from urllib3.util.retry import Retry
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "..", "etc", "config.json")
 
-# Prefixes intentionally start with a emoji (NOT a bracket or CJK char). The calendar
-# renders the day note and its entries as all-day events ordered by title via
-# ICU collation; titles beginning with '[' / '【' sort BEFORE the digit-led day
-# note ("29 - 周五") and float above it. A Emoji-led prefix sorts after the digits,
-# so entries stay below the day-note title like Trilium's native entries.
-# Joined to the title as "<prefix> · <title>".
-TYPE_PREFIX = {
-    "trap": "🪤",
-    "work": "📦",
-    "decision": "🚦",
-    "learn": "💡",
+# Boxicons class for each diary type, applied via #iconClass label.
+# Trilium natively renders #iconClass in the note tree and calendar view.
+# See https://boxicons.com/ for the full icon set.
+TYPE_ICON = {
+    "trap": "bx bx-bug-alt",
+    "work": "bx bx-package",
+    "decision": "bx bx-traffic-cone",
+    "learn": "bx bx-bulb",
 }
 
 WEEKDAY_ZH = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -256,8 +253,12 @@ def render_markdown(text):
     )
 
 
-def resolve_prefix(ntype, override):
-    return override if override is not None else TYPE_PREFIX.get(ntype, "")
+def resolve_icon(ntype, override):
+    """Return the Boxicons class for the given type, or the override if provided."""
+    if override is not None:
+        # --prefix is repurposed as --icon override; keep backward compat
+        return override
+    return TYPE_ICON.get(ntype, "")
 
 
 def parse_date(s):
@@ -332,11 +333,8 @@ def cmd_add(args):
     date = parse_date(args.date)
     day_id = t.ensure_date_path(date)
 
-    prefix = resolve_prefix(args.type, args.prefix)
-    title = (f"{prefix} · {args.title}") if prefix else args.title
     html = render_markdown(md)
-
-    nid = t.create_note(day_id, title, html, ntype="text")["note"]["noteId"]
+    nid = t.create_note(day_id, args.title, html, ntype="text")["note"]["noteId"]
     # The entry shows in the calendar cell simply by being a child of the
     # #dateNote day note (same as Trilium's native day entries). We deliberately
     # do NOT add #startDate — that would render it as an all-day event bar
@@ -345,9 +343,13 @@ def cmd_add(args):
     t.add_label(nid, "diary")
     t.add_label(nid, "diaryType", args.type)
     t.add_label(nid, "diaryDate", date.isoformat())
+    # Set Boxicons icon via #iconClass (rendered in tree & calendar by Trilium).
+    icon = resolve_icon(args.type, getattr(args, "prefix", None))
+    if icon:
+        t.add_label(nid, "iconClass", icon)
 
     url = "{}/#root/{}".format(cfg["server"], nid)
-    print(f"✓ 已写入日历: {title}")
+    print(f"✓ 已写入日历: {args.title}")
     print(f"  日期: {date.isoformat()}（{WEEKDAY_ZH[date.weekday()]}）")
     print(f"  noteId: {nid}")
     print(f"  打开: {url}")
@@ -444,16 +446,10 @@ def cmd_update(args):
     cfg = load_config()
     t = Trilium(cfg)
     note = t.get_note(args.note_id)
-    title_changed = False
 
     # Update title if --title provided
     if args.title is not None:
-        old_type = _get_attr_value(note, "diaryType")
-        ntype = args.type if args.type is not None else old_type
-        prefix = resolve_prefix(ntype, args.prefix)
-        new_title = (f"{prefix} · {args.title}") if prefix else args.title
-        t.update_note(args.note_id, title=new_title)
-        title_changed = True
+        t.update_note(args.note_id, title=args.title)
 
     # Update content if --content-file provided or stdin piped
     if args.content_file:
@@ -469,18 +465,18 @@ def cmd_update(args):
             html = render_markdown(md)
             t.update_note_content(args.note_id, html)
 
-    # Update type label if --type provided
+    # Update type label and icon if --type provided
     if args.type is not None:
         type_attr = _get_attr(note, "diaryType")
         if type_attr:
             t.patch_attribute(type_attr["attributeId"], value=args.type)
-        # If title wasn't explicitly changed, rebuild it with new type prefix
-        if not title_changed:
-            old_title = note.get("title", "")
-            bare = old_title.split(" · ", 1)[-1] if " · " in old_title else old_title
-            prefix = resolve_prefix(args.type, args.prefix)
-            new_title = (f"{prefix} · {bare}") if prefix else bare
-            t.update_note(args.note_id, title=new_title)
+        # Update #iconClass to match new type
+        icon = resolve_icon(args.type, getattr(args, "prefix", None))
+        icon_attr = _get_attr(note, "iconClass")
+        if icon_attr:
+            t.patch_attribute(icon_attr["attributeId"], value=icon)
+        elif icon:
+            t.add_label(args.note_id, "iconClass", icon)
 
     # Show result
     updated = t.get_note(args.note_id)
@@ -502,10 +498,10 @@ def build_parser():
     pa.add_argument(
         "--type", required=True, help="类型: trap/work/decision/learn 或自定义"
     )
-    pa.add_argument("--title", required=True, help="条目标题（不含类型前缀）")
+    pa.add_argument("--title", required=True, help="条目标题")
     pa.add_argument("--date", help="日期 YYYY-MM-DD，默认今天")
     pa.add_argument("--content-file", help="markdown 文件路径；省略则读 stdin")
-    pa.add_argument("--prefix", help="覆盖默认标题前缀（如 [复盘]）")
+    pa.add_argument("--prefix", help="覆盖默认图标（Boxicons class，如 bx bx-star）")
 
     pl = sub.add_parser("list", help="列出日记条目")
     pl.add_argument("--date", help="只列某天 YYYY-MM-DD")
@@ -526,10 +522,10 @@ def build_parser():
 
     pu = sub.add_parser("update", help="修改一条日记")
     pu.add_argument("note_id", help="笔记 ID")
-    pu.add_argument("--title", help="新标题（不含类型前缀）")
+    pu.add_argument("--title", help="新标题")
     pu.add_argument("--type", help="新类型: trap/work/decision/learn 或自定义")
     pu.add_argument("--content-file", help="新内容的 markdown 文件路径")
-    pu.add_argument("--prefix", help="覆盖默认标题前缀")
+    pu.add_argument("--prefix", help="覆盖默认图标（Boxicons class）")
     return p
 
 

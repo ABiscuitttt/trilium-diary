@@ -56,7 +56,7 @@ echo '## 背景\n...\n## 结果\n...' | \
 EOF
 ```
 
-`--type` 选项：`trap`（踩坑）、`work`（工作）、`decision`（决策）、`learn`（学习）。
+`--type` 选项：`trap`（踩坑）、`work`（工作）、`decision`（决策）、`learn`（学习）。图标通过 `#iconClass` 标签（Boxicons）自动设置。
 
 ## 功能特性
 
