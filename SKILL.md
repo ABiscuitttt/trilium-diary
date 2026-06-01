@@ -54,7 +54,7 @@ fi
    - 工作：背景 → 做了什么 → 结果
    - 带关键命令、报错、代码片段
 2. **展示确认**：草稿 + `类型 + 标题` 给用户看，**确认后才写**
-3. **写入**：调 `add` 命令，含代码块用 `--content-file`
+3. **写入**：调 `add` 命令，通过 heredoc stdin 传入内容（无需临时文件）
 4. **回报**：贴出标题、日期和打开链接
 
 ### 查看
@@ -66,7 +66,7 @@ fi
 ### 修改
 
 1. 用户说"改一下""更新"时触发
-2. 用 `update` 命令，按需传 `--title`、`--type`、`--content-file`
+2. 用 `update` 命令，按需传 `--title`、`--type`，内容通过 heredoc stdin 传入
 3. 修改类型时自动更新标题前缀 emoji
 
 ### 删除
@@ -83,13 +83,28 @@ cd "$(dirname "$SKILL_MD")"   # 按实际安装路径调整
 # 检查连通性（含日历根标签验证）
 ./scripts/trilium.py check
 
-# 写入（stdin）
-echo '## 现象\n...\n## 解决\n...' | \
-  ./scripts/trilium.py add --type trap --title "ETAPI 401 鉴权"
+# 写入（heredoc stdin，推荐写法，无需临时文件）
+./scripts/trilium.py add --type trap --title "ETAPI 401 鉴权" <<'EOF'
+## 现象
+调用 ETAPI 返回 401...
 
-# 写入（文件，含代码块时推荐）
+## 解决
+重新生成 token...
+EOF
+
+# 写入（简短内容可用 echo + pipe）
+echo '## 背景\n...\n## 结果\n...' | \
+  ./scripts/trilium.py add --type work --title "联调通过"
+
+# 写入（指定日期）
 ./scripts/trilium.py add --type work --title "联调通过" \
-  --date 2026-05-28 --content-file /tmp/note.md
+  --date 2026-05-28 <<'EOF'
+## 背景
+前后端联调完成
+
+## 结果
+所有接口跑通
+EOF
 
 # 写入（交互式编辑器，不传内容时自动打开 $EDITOR）
 ./scripts/trilium.py add --type learn --title "新知识"
@@ -98,11 +113,15 @@ echo '## 现象\n...\n## 解决\n...' | \
 ./scripts/trilium.py get <noteId>              # 元数据
 ./scripts/trilium.py get <noteId> --content    # 含内容
 
-# 修改
+# 修改内容（heredoc stdin）
+./scripts/trilium.py update <noteId> <<'EOF'
+## 新内容
+更新后的 markdown...
+EOF
+
+# 修改标题/类型
 ./scripts/trilium.py update <noteId> --title "新标题"
 ./scripts/trilium.py update <noteId> --type work
-./scripts/trilium.py update <noteId> --content-file /tmp/new.md
-echo 'new content' | ./scripts/trilium.py update <noteId>  # stdin
 
 # 删除
 ./scripts/trilium.py delete <noteId>
@@ -137,7 +156,7 @@ Journal (#calendarRoot)
 
 ## 注意事项
 
-- 含反引号/代码块的内容用 `--content-file`，避免 shell 转义
+- 含反引号/代码块的内容用 heredoc（`<<'EOF'`），无需临时文件，单引号包裹 EOF 防止 shell 转义
 - markdown 本地渲染为 HTML（ETAPI 的 render-markdown 接口不认 ETAPI token）
 - 日历根 id 在 `etc/config.json` 的 `calendarRootId`，留空自动探测 `#calendarRoot`
 - 凭证文件 `etc/config.json`（权限 600，已 gitignore，**切勿回显 token**）
