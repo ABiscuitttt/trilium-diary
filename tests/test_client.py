@@ -370,7 +370,10 @@ class TestCmdAdd:
             out = capsys.readouterr().out
             assert "t" in out
             # Verify iconClass label was set with custom prefix
-            icon_calls = [c for c in inst.add_label.call_args_list if c[0][1] == "iconClass"]
+            icon_calls = [
+                c for c in inst.add_label.call_args_list
+                if c[0][1] == "iconClass"
+            ]
             assert len(icon_calls) == 1
             assert icon_calls[0][0][2] == "bx bx-fire"
 
@@ -401,7 +404,10 @@ class TestCmdAdd:
             out = capsys.readouterr().out
             assert "raw title" in out
             # No iconClass label for unknown type
-            icon_calls = [c for c in inst.add_label.call_args_list if c[0][1] == "iconClass"]
+            icon_calls = [
+                c for c in inst.add_label.call_args_list
+                if c[0][1] == "iconClass"
+            ]
             assert len(icon_calls) == 0
 
 
@@ -660,7 +666,10 @@ class TestCmdUpdate:
             # Title should NOT be changed when only type is updated
             inst.update_note.assert_not_called()
             # iconClass should be updated
-            icon_add_calls = [c for c in inst.add_label.call_args_list if c[0][1] == "iconClass"]
+            icon_add_calls = [
+                c for c in inst.add_label.call_args_list
+                if c[0][1] == "iconClass"
+            ]
             assert len(icon_add_calls) == 1
             assert icon_add_calls[0][0][2] == "bx bx-package"
 
