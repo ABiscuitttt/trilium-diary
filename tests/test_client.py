@@ -292,10 +292,10 @@ class TestCmdAdd:
             )
             cmd_add(args)
             out = capsys.readouterr().out
-            assert "🪤 · test bug" in out
+            assert "test bug" in out
             assert "2026-06-01" in out
-            # Verify labels were added
-            assert inst.add_label.call_count == 3
+            # Verify labels were added (diary, diaryType, diaryDate, iconClass)
+            assert inst.add_label.call_count == 4
 
     def test_add_empty_content_exits(self, tmp_path):
         config_path = _make_config(tmp_path)
@@ -342,7 +342,7 @@ class TestCmdAdd:
             )
             cmd_add(args)
             out = capsys.readouterr().out
-            assert "💡 · insight" in out
+            assert "insight" in out
 
     def test_add_with_custom_prefix(self, tmp_path, capsys):
         config_path = _make_config(tmp_path)
@@ -364,14 +364,18 @@ class TestCmdAdd:
                 title="t",
                 date="2026-06-01",
                 content_file=str(content_file),
-                prefix="🔥",
+                prefix="bx bx-fire",
             )
             cmd_add(args)
             out = capsys.readouterr().out
-            assert "🔥 · t" in out
+            assert "t" in out
+            # Verify iconClass label was set with custom prefix
+            icon_calls = [c for c in inst.add_label.call_args_list if c[0][1] == "iconClass"]
+            assert len(icon_calls) == 1
+            assert icon_calls[0][0][2] == "bx bx-fire"
 
     def test_add_no_prefix(self, tmp_path, capsys):
-        """Custom type without prefix override → no emoji prefix."""
+        """Custom type without prefix override → no iconClass label."""
         config_path = _make_config(tmp_path)
         content_file = tmp_path / "note.md"
         content_file.write_text("content", encoding="utf-8")
@@ -396,7 +400,9 @@ class TestCmdAdd:
             cmd_add(args)
             out = capsys.readouterr().out
             assert "raw title" in out
-            assert "·" not in out
+            # No iconClass label for unknown type
+            icon_calls = [c for c in inst.add_label.call_args_list if c[0][1] == "iconClass"]
+            assert len(icon_calls) == 0
 
 
 class TestCmdList:
@@ -615,7 +621,7 @@ class TestCmdUpdate:
             inst = MockTril.return_value
             inst.get_note.return_value = {
                 "noteId": "n1",
-                "title": "🪤 · old bug",
+                "title": "old bug",
                 "attributes": [
                     {"name": "diaryType", "value": "trap", "attributeId": "at1"},
                     {"name": "diaryDate", "value": "2026-06-01"},
@@ -628,7 +634,7 @@ class TestCmdUpdate:
             cmd_update(args)
             out = capsys.readouterr().out
             assert "✓ 已更新" in out
-            inst.update_note.assert_called_with("n1", title="🪤 · new bug")
+            inst.update_note.assert_called_with("n1", title="new bug")
 
     def test_update_type(self, tmp_path, capsys):
         config_path = _make_config(tmp_path)
@@ -640,7 +646,7 @@ class TestCmdUpdate:
             inst = MockTril.return_value
             inst.get_note.return_value = {
                 "noteId": "n1",
-                "title": "🪤 · some bug",
+                "title": "some bug",
                 "attributes": [
                     {"name": "diaryType", "value": "trap", "attributeId": "at1"},
                 ],
@@ -651,7 +657,12 @@ class TestCmdUpdate:
             )
             cmd_update(args)
             inst.patch_attribute.assert_called_with("at1", value="work")
-            inst.update_note.assert_called_with("n1", title="📦 · some bug")
+            # Title should NOT be changed when only type is updated
+            inst.update_note.assert_not_called()
+            # iconClass should be updated
+            icon_add_calls = [c for c in inst.add_label.call_args_list if c[0][1] == "iconClass"]
+            assert len(icon_add_calls) == 1
+            assert icon_add_calls[0][0][2] == "bx bx-package"
 
     def test_update_content(self, tmp_path, capsys):
         config_path = _make_config(tmp_path)
@@ -665,7 +676,7 @@ class TestCmdUpdate:
             inst = MockTril.return_value
             inst.get_note.return_value = {
                 "noteId": "n1",
-                "title": "🪤 · bug",
+                "title": "bug",
                 "attributes": [],
             }
 
@@ -718,7 +729,7 @@ class TestCmdUpdate:
             inst = MockTril.return_value
             inst.get_note.return_value = {
                 "noteId": "n1",
-                "title": "🪤 · bug",
+                "title": "bug",
                 "attributes": [],
             }
 
@@ -893,5 +904,5 @@ class TestCmdAddEditor:
             )
             cmd_add(args)
             out = capsys.readouterr().out
-            assert "📦 · task" in out
+            assert "task" in out
             mock_call.assert_called_once()
