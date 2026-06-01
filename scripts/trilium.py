@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --quiet
 # /// script
-# requires-python = ">=3.9"
+# requires-python = ">=3.12"
 # dependencies = ["markdown>=3.5", "requests>=2.31"]
 # ///
 """trilium-diary: write markdown dev-diary entries into Trilium's calendar.
@@ -24,10 +24,14 @@ render-markdown endpoint rejects ETAPI tokens). Deps managed by uv.
 Commands:
     check                       verify server + token, locate the calendar root
     add --type T --title S      create an entry (content from --content-file/stdin)
-    list [--date YYYY-MM-DD]     list diary entries
+    get NOTE_ID                 show entry details (--content for full content)
+    update NOTE_ID [--title ..] modify entry title/type/content
+    delete NOTE_ID              delete an entry by note id
+    list [--date YYYY-MM-DD]    list diary entries
 
 Run directly (uv resolves deps):  ./trilium.py check
 """
+
 import argparse
 import datetime as _dt
 import json
@@ -54,8 +58,21 @@ TYPE_PREFIX = {
 }
 
 WEEKDAY_ZH = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-MONTH_EN = ["", "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December"]
+MONTH_EN = [
+    "",
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
 
 MD_EXTENSIONS = ["fenced_code", "tables", "sane_lists", "nl2br", "codehilite"]
 MD_EXTENSION_CONFIGS = {"codehilite": {"noclasses": True}}
@@ -68,7 +85,7 @@ def die(msg, code=1):
 
 def load_config():
     if not os.path.exists(CONFIG_PATH):
-        die("找不到配置 %s" % CONFIG_PATH)
+        die(f"找不到配置 {CONFIG_PATH}")
     with open(CONFIG_PATH, encoding="utf-8") as f:
         cfg = json.load(f)
     if not cfg.get("token"):
@@ -93,11 +110,14 @@ class Trilium:
         try:
             r = self.s.request(method, self.base + path, timeout=15, **kw)
         except requests.RequestException as e:
-            die("连接 Trilium 失败 (%s): %s" % (self.base, e))
+            die(f"连接 Trilium 失败 ({self.base}): {e}")
         if r.status_code == 401:
-            die("ETAPI token 无效或已吊销 (401)。请在 Trilium -> Options -> ETAPI 重新生成。")
+            die(
+                "ETAPI token 无效或已吊销 (401)。"
+                "请在 Trilium -> Options -> ETAPI 重新生成。"
+            )
         if r.status_code >= 400:
-            die("ETAPI %s %s -> HTTP %d\n%s" % (method, path, r.status_code, r.text[:500]))
+            die(f"ETAPI {method} {path} -> HTTP {r.status_code}\n{r.text[:500]}")
         return r
 
     def app_info(self):
@@ -108,13 +128,40 @@ class Trilium:
         return self._req("GET", "/notes", params=params).json().get("results", [])
 
     def create_note(self, parent_id, title, content, ntype="text"):
-        body = {"parentNoteId": parent_id, "title": title,
-                "type": ntype, "content": content}
+        body = {
+            "parentNoteId": parent_id,
+            "title": title,
+            "type": ntype,
+            "content": content,
+        }
         return self._req("POST", "/create-note", json=body).json()
 
     def add_label(self, note_id, name, value=""):
         body = {"noteId": note_id, "type": "label", "name": name, "value": value}
         return self._req("POST", "/attributes", json=body).json()
+
+    def get_note(self, note_id):
+        return self._req("GET", f"/notes/{note_id}").json()
+
+    def get_note_content(self, note_id):
+        return self._req("GET", f"/notes/{note_id}/content").text
+
+    def update_note_content(self, note_id, content):
+        return self._req(
+            "PUT", f"/notes/{note_id}/content", data=content.encode("utf-8")
+        )
+
+    def delete_note(self, note_id):
+        return self._req("DELETE", f"/notes/{note_id}")
+
+    def update_note(self, note_id, **fields):
+        return self._req("PATCH", f"/notes/{note_id}", json=fields).json()
+
+    def patch_attribute(self, attr_id, **fields):
+        return self._req("PATCH", f"/attributes/{attr_id}", json=fields).json()
+
+    def delete_attribute(self, attr_id):
+        return self._req("DELETE", f"/attributes/{attr_id}")
 
     # ---- calendar navigation ------------------------------------------------
 
@@ -124,25 +171,31 @@ class Trilium:
             return self.cfg["calendarRootId"]
         hits = self.search("#calendarRoot", limit="5")
         if not hits:
-            die("找不到日历根（带 #calendarRoot 的笔记）。"
-                "请在 etc/config.json 设置 calendarRootId，或在 Trilium 里建立日历。")
+            die(
+                "找不到日历根（带 #calendarRoot 的笔记）。"
+                "请在 etc/config.json 设置 calendarRootId，或在 Trilium 里建立日历。"
+            )
         if len(hits) > 1:
-            ids = ", ".join("%s(%s)" % (h["noteId"], h["title"]) for h in hits)
-            die("发现多个 #calendarRoot：%s\n请在 etc/config.json 用 calendarRootId 指定。" % ids)
+            ids = ", ".join("{}({})".format(h["noteId"], h["title"]) for h in hits)
+            die(
+                f"发现多个 #calendarRoot：{ids}\n"
+                "请在 etc/config.json 用 calendarRootId 指定。"
+            )
         return hits[0]["noteId"]
 
     def _child_with_label(self, parent_id, label, value):
         """Find a direct child of parent_id carrying #label=value (calendar key)."""
-        expr = 'note.parents.noteId="%s" #%s="%s"' % (parent_id, label, value)
+        expr = f'note.parents.noteId="{parent_id}" #{label}="{value}"'
         for n in self.search(expr, limit="30"):
-            if parent_id in (n.get("parentNoteIds") or []):
-                if any(a["name"] == label and a["value"] == value
-                       for a in n.get("attributes", [])):
-                    return n["noteId"]
+            if parent_id in (n.get("parentNoteIds") or []) and any(
+                a["name"] == label and a["value"] == value
+                for a in n.get("attributes", [])
+            ):
+                return n["noteId"]
         return None
 
     def ensure_year(self, root_id, date):
-        val = "%04d" % date.year
+        val = f"{date.year:04d}"
         found = self._child_with_label(root_id, "yearNote", val)
         if found:
             return found
@@ -151,11 +204,11 @@ class Trilium:
         return nid
 
     def ensure_month(self, year_id, date):
-        val = "%04d-%02d" % (date.year, date.month)
+        val = f"{date.year:04d}-{date.month:02d}"
         found = self._child_with_label(year_id, "monthNote", val)
         if found:
             return found
-        title = "%02d - %s" % (date.month, MONTH_EN[date.month])
+        title = f"{date.month:02d} - {MONTH_EN[date.month]}"
         nid = self.create_note(year_id, title, "")["note"]["noteId"]
         self.add_label(nid, "monthNote", val)
         return nid
@@ -165,7 +218,7 @@ class Trilium:
         found = self._child_with_label(month_id, "dateNote", val)
         if found:
             return found
-        title = "%02d - %s" % (date.day, WEEKDAY_ZH[date.weekday()])
+        title = f"{date.day:02d} - {WEEKDAY_ZH[date.weekday()]}"
         nid = self.create_note(month_id, title, "")["note"]["noteId"]
         self.add_label(nid, "dateNote", val)
         return nid
@@ -180,7 +233,8 @@ class Trilium:
 
 def render_markdown(text):
     return markdown.markdown(
-        text, extensions=MD_EXTENSIONS, extension_configs=MD_EXTENSION_CONFIGS)
+        text, extensions=MD_EXTENSIONS, extension_configs=MD_EXTENSION_CONFIGS
+    )
 
 
 def resolve_prefix(ntype, override):
@@ -193,18 +247,30 @@ def parse_date(s):
     try:
         return _dt.datetime.strptime(s, "%Y-%m-%d").date()
     except ValueError:
-        die("日期格式应为 YYYY-MM-DD，收到: %s" % s)
+        die(f"日期格式应为 YYYY-MM-DD，收到: {s}")
+
+
+def _get_attr(note, name):
+    """Return the first attribute dict matching name, or None."""
+    return next((a for a in note.get("attributes", []) if a["name"] == name), None)
+
+
+def _get_attr_value(note, name, default=""):
+    """Return the value of the first attribute matching name."""
+    attr = _get_attr(note, name)
+    return attr["value"] if attr else default
 
 
 # ---- commands ---------------------------------------------------------------
+
 
 def cmd_check(args):
     cfg = load_config()
     t = Trilium(cfg)
     info = t.app_info()
-    print("✓ Trilium 可达: %s (v%s)" % (cfg["server"], info.get("appVersion")))
+    print("✓ Trilium 可达: {} (v{})".format(cfg["server"], info.get("appVersion")))
     root = t.calendar_root()
-    print("✓ token 有效，日历根 = %s" % root)
+    print(f"✓ token 有效，日历根 = {root}")
 
 
 def cmd_add(args):
@@ -223,7 +289,7 @@ def cmd_add(args):
     day_id = t.ensure_date_path(date)
 
     prefix = resolve_prefix(args.type, args.prefix)
-    title = ("%s · %s" % (prefix, args.title)) if prefix else args.title
+    title = (f"{prefix} · {args.title}") if prefix else args.title
     html = render_markdown(md)
 
     nid = t.create_note(day_id, title, html, ntype="text")["note"]["noteId"]
@@ -236,11 +302,11 @@ def cmd_add(args):
     t.add_label(nid, "diaryType", args.type)
     t.add_label(nid, "diaryDate", date.isoformat())
 
-    url = "%s/#root/%s" % (cfg["server"], nid)
-    print("✓ 已写入日历: %s" % title)
-    print("  日期: %s（%s）" % (date.isoformat(), WEEKDAY_ZH[date.weekday()]))
-    print("  noteId: %s" % nid)
-    print("  打开: %s" % url)
+    url = "{}/#root/{}".format(cfg["server"], nid)
+    print(f"✓ 已写入日历: {title}")
+    print(f"  日期: {date.isoformat()}（{WEEKDAY_ZH[date.weekday()]}）")
+    print(f"  noteId: {nid}")
+    print(f"  打开: {url}")
 
 
 def cmd_list(args):
@@ -248,28 +314,129 @@ def cmd_list(args):
     t = Trilium(cfg)
     if args.date:
         date = parse_date(args.date)
-        expr = '#diary #diaryDate="%s"' % date.isoformat()
+        expr = f'#diary #diaryDate="{date.isoformat()}"'
     else:
         expr = "#diary"
-    rows = t.search(expr, orderBy="dateCreated", orderDirection="desc",
-                    limit=str(args.limit))
+    rows = t.search(
+        expr, orderBy="dateCreated", orderDirection="desc", limit=str(args.limit)
+    )
     if not rows:
         print("(没有匹配的日记条目)")
         return
     for n in rows:
-        sd = next((a["value"] for a in n.get("attributes", [])
-                   if a["name"] == "diaryDate"), "")
-        print("%s  %-12s %s" % (n.get("noteId"), sd, n.get("title")))
+        sd = next(
+            (a["value"] for a in n.get("attributes", []) if a["name"] == "diaryDate"),
+            "",
+        )
+        print(f"{n.get('noteId')}  {sd:<12} {n.get('title')}")
+
+
+def cmd_delete(args):
+    cfg = load_config()
+    t = Trilium(cfg)
+    note = t.get_note(args.note_id)
+    # Show what will be deleted
+    diary_type = next(
+        (a["value"] for a in note.get("attributes", []) if a["name"] == "diaryType"),
+        "",
+    )
+    diary_date = next(
+        (a["value"] for a in note.get("attributes", []) if a["name"] == "diaryDate"),
+        "",
+    )
+    title = note.get("title", "")
+    info_parts = [f"  标题: {title}"]
+    if diary_type:
+        info_parts.append(f"  类型: {diary_type}")
+    if diary_date:
+        info_parts.append(f"  日期: {diary_date}")
+    print("即将删除：")
+    print("\n".join(info_parts))
+    t.delete_note(args.note_id)
+    print(f"✓ 已删除: {title}")
+
+
+def cmd_get(args):
+    cfg = load_config()
+    t = Trilium(cfg)
+    note = t.get_note(args.note_id)
+    title = note.get("title", "")
+    diary_type = _get_attr_value(note, "diaryType")
+    diary_date = _get_attr_value(note, "diaryDate")
+
+    print(f"标题: {title}")
+    if diary_type:
+        print(f"类型: {diary_type}")
+    if diary_date:
+        print(f"日期: {diary_date}")
+    print(f"noteId: {note.get('noteId', '')}")
+    url = "{}/#root/{}".format(cfg["server"], args.note_id)
+    print(f"打开: {url}")
+
+    if args.content:
+        content = t.get_note_content(args.note_id)
+        if content:
+            print("---")
+            print(content)
+
+
+def cmd_update(args):
+    cfg = load_config()
+    t = Trilium(cfg)
+    note = t.get_note(args.note_id)
+    title_changed = False
+
+    # Update title if --title provided
+    if args.title is not None:
+        old_type = _get_attr_value(note, "diaryType")
+        ntype = args.type if args.type is not None else old_type
+        prefix = resolve_prefix(ntype, args.prefix)
+        new_title = (f"{prefix} · {args.title}") if prefix else args.title
+        t.update_note(args.note_id, title=new_title)
+        title_changed = True
+
+    # Update content if --content-file provided
+    if args.content_file:
+        with open(args.content_file, encoding="utf-8") as f:
+            md = f.read()
+        if not md.strip():
+            die("内容为空")
+        html = render_markdown(md)
+        t.update_note_content(args.note_id, html)
+
+    # Update type label if --type provided
+    if args.type is not None:
+        type_attr = _get_attr(note, "diaryType")
+        if type_attr:
+            t.patch_attribute(type_attr["attributeId"], value=args.type)
+        # If title wasn't explicitly changed, rebuild it with new type prefix
+        if not title_changed:
+            old_title = note.get("title", "")
+            bare = old_title.split(" · ", 1)[-1] if " · " in old_title else old_title
+            prefix = resolve_prefix(args.type, args.prefix)
+            new_title = (f"{prefix} · {bare}") if prefix else bare
+            t.update_note(args.note_id, title=new_title)
+
+    # Show result
+    updated = t.get_note(args.note_id)
+    print(f"✓ 已更新: {updated.get('title', '')}")
+    print(f"  noteId: {args.note_id}")
+    url = "{}/#root/{}".format(cfg["server"], args.note_id)
+    print(f"  打开: {url}")
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="trilium.py", description="把工作日记写入 Trilium 日历")
+    p = argparse.ArgumentParser(
+        prog="trilium.py", description="把工作日记写入 Trilium 日历"
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("check", help="检查服务器、token、日历根")
 
     pa = sub.add_parser("add", help="新增一条日记条目（挂到当天日历）")
-    pa.add_argument("--type", required=True, help="类型: trap/work/decision/learn 或自定义")
+    pa.add_argument(
+        "--type", required=True, help="类型: trap/work/decision/learn 或自定义"
+    )
     pa.add_argument("--title", required=True, help="条目标题（不含类型前缀）")
     pa.add_argument("--date", help="日期 YYYY-MM-DD，默认今天")
     pa.add_argument("--content-file", help="markdown 文件路径；省略则读 stdin")
@@ -278,12 +445,33 @@ def build_parser():
     pl = sub.add_parser("list", help="列出日记条目")
     pl.add_argument("--date", help="只列某天 YYYY-MM-DD")
     pl.add_argument("--limit", type=int, default=50, help="最多条数，默认 50")
+
+    pd = sub.add_parser("delete", help="删除一条日记条目")
+    pd.add_argument("note_id", help="要删除的笔记 ID")
+
+    pg = sub.add_parser("get", help="查看一条日记的详情")
+    pg.add_argument("note_id", help="笔记 ID")
+    pg.add_argument("--content", action="store_true", help="同时显示笔记内容")
+
+    pu = sub.add_parser("update", help="修改一条日记")
+    pu.add_argument("note_id", help="笔记 ID")
+    pu.add_argument("--title", help="新标题（不含类型前缀）")
+    pu.add_argument("--type", help="新类型: trap/work/decision/learn 或自定义")
+    pu.add_argument("--content-file", help="新内容的 markdown 文件路径")
+    pu.add_argument("--prefix", help="覆盖默认标题前缀")
     return p
 
 
 def main():
     args = build_parser().parse_args()
-    {"check": cmd_check, "add": cmd_add, "list": cmd_list}[args.cmd](args)
+    {
+        "check": cmd_check,
+        "add": cmd_add,
+        "list": cmd_list,
+        "delete": cmd_delete,
+        "get": cmd_get,
+        "update": cmd_update,
+    }[args.cmd](args)
 
 
 if __name__ == "__main__":

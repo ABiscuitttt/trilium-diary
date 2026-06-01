@@ -38,4 +38,4 @@ cp etc/config.example.json etc/config.json
 
 ## 依赖
 
-Python 3.9+，通过 [uv](https://docs.astral.sh/uv/) 自动管理依赖（`markdown`、`requests`）。
+Python 3.12+，通过 [uv](https://docs.astral.sh/uv/) 自动管理依赖（`markdown`、`requests`）。
