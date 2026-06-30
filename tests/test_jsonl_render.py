@@ -35,6 +35,13 @@ def _assistant_text(text):
     }
 
 
+def _assistant_blocks(*blocks):
+    return {
+        "type": "assistant",
+        "message": {"role": "assistant", "content": list(blocks)},
+    }
+
+
 class TestPlainText:
     def test_single_user_text(self):
         md = render_records(_records(_user("你好")))
@@ -66,3 +73,20 @@ class TestEmpty:
     def test_empty_records_raises(self):
         with pytest.raises(EmptyTranscriptError):
             render_records([])
+
+
+class TestThinking:
+    def test_thinking_wrapped_in_details(self):
+        rec = _assistant_blocks({"type": "thinking", "thinking": "推理过程"})
+        md = render_records([rec])
+        assert "<details><summary>thinking</summary>" in md
+        assert "推理过程" in md
+        assert "</details>" in md
+
+    def test_thinking_and_text_in_order(self):
+        rec = _assistant_blocks(
+            {"type": "thinking", "thinking": "先想"},
+            {"type": "text", "text": "再说"},
+        )
+        md = render_records([rec])
+        assert md.index("先想") < md.index("再说")

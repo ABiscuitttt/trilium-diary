@@ -87,6 +87,13 @@ def _render_assistant(rec: dict) -> str:
         btype = block.get("type")
         if btype == "text":
             rendered.append(block.get("text", ""))
+        elif btype == "thinking":
+            content = block.get("thinking", "")
+            rendered.append(
+                "<details><summary>thinking</summary>\n\n"
+                f"{content}\n\n"
+                "</details>"
+            )
     if not rendered:
         return ""
     return "## Assistant\n\n" + "\n\n".join(rendered)
