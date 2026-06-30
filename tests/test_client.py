@@ -806,9 +806,8 @@ class TestCmdRecapUpdate:
              patch.object(Trilium, "add_label") as add_label:
             cmd_recap(args)
 
-        upd_content.assert_called_once_with(
-            "existing-id", upd_content.call_args.args[1]
-        )
+        upd_content.assert_called_once()
+        assert upd_content.call_args.args[0] == "existing-id"
         upd_note.assert_called_once_with("existing-id", title="Recap：v2")
         create.assert_not_called()
         add_label.assert_not_called()
