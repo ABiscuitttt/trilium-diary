@@ -90,3 +90,75 @@ class TestThinking:
         )
         md = render_records([rec])
         assert md.index("先想") < md.index("再说")
+
+
+class TestTool:
+    def test_tool_use_renders_name_and_input(self):
+        rec = _assistant_blocks(
+            {
+                "type": "tool_use",
+                "id": "t1",
+                "name": "Bash",
+                "input": {"command": "ls"},
+            }
+        )
+        md = render_records([rec])
+        assert "### Tool: Bash" in md
+        assert '"command"' in md
+        assert "ls" in md
+
+    def test_tool_result_paired_with_tool_use(self):
+        records = [
+            _assistant_blocks(
+                {
+                    "type": "tool_use",
+                    "id": "t1",
+                    "name": "Bash",
+                    "input": {"command": "ls"},
+                }
+            ),
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": "etc\nscripts",
+                        }
+                    ],
+                },
+            },
+        ]
+        md = render_records(records)
+        # tool_result must appear after the tool_use it pairs with, not
+        # as a stray "## User" section
+        assert "## User" not in md or md.count("## User") == 0
+        assert "<details><summary>result</summary>" in md
+        assert "etc" in md
+        assert md.index("### Tool: Bash") < md.index(
+            "<details><summary>result</summary>"
+        )
+
+    def test_orphan_tool_result_appended_at_end(self):
+        records = [
+            _user("你好"),
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "missing",
+                            "content": "orphaned",
+                        }
+                    ],
+                },
+            },
+        ]
+        md = render_records(records)
+        assert "orphaned" in md
+        assert "## Orphan tool results" in md
+        assert md.index("你好") < md.index("orphaned")

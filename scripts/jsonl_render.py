@@ -46,7 +46,22 @@ def render_jsonl(path: str) -> str:
 
 
 def render_records(records: list[dict]) -> str:
-    """Render parsed JSONL records into markdown."""
+    """Render parsed JSONL records into markdown.
+
+    tool_use blocks are rendered together with their paired tool_result
+    (matched on tool_use_id). Orphan tool_results are listed at the end.
+    """
+    tool_results: dict[str, str] = {}
+    for rec in records:
+        if rec.get("type") != "user":
+            continue
+        for block in _content_blocks(rec):
+            if block.get("type") == "tool_result":
+                tid = block.get("tool_use_id")
+                if tid:
+                    tool_results[tid] = block.get("content", "")
+
+    matched: set[str] = set()
     parts: list[str] = []
     for rec in records:
         rtype = rec.get("type")
@@ -57,9 +72,26 @@ def render_records(records: list[dict]) -> str:
             if chunk:
                 parts.append(chunk)
         elif rtype == "assistant":
-            chunk = _render_assistant(rec)
+            chunk = _render_assistant(rec, tool_results, matched)
             if chunk:
                 parts.append(chunk)
+
+    orphans = [
+        (tid, content)
+        for tid, content in tool_results.items()
+        if tid not in matched
+    ]
+    if orphans:
+        orphan_md = ["## Orphan tool results"]
+        for tid, content in orphans:
+            orphan_md.append(
+                f"### {tid}\n\n"
+                "<details><summary>result</summary>\n\n"
+                f"{content}\n\n"
+                "</details>"
+            )
+        parts.append("\n\n".join(orphan_md))
+
     if not parts:
         raise EmptyTranscriptError("no renderable content in transcript")
     return "\n\n".join(parts) + "\n"
@@ -81,7 +113,9 @@ def _render_user(rec: dict) -> str:
     return "## User\n\n" + "\n\n".join(texts)
 
 
-def _render_assistant(rec: dict) -> str:
+def _render_assistant(
+    rec: dict, tool_results: dict[str, str], matched: set[str]
+) -> str:
     rendered: list[str] = []
     for block in _content_blocks(rec):
         btype = block.get("type")
@@ -94,6 +128,20 @@ def _render_assistant(rec: dict) -> str:
                 f"{content}\n\n"
                 "</details>"
             )
+        elif btype == "tool_use":
+            name = block.get("name", "?")
+            inp = block.get("input", {})
+            inp_json = json.dumps(inp, ensure_ascii=False, indent=2)
+            tu_id = block.get("id", "")
+            piece = f"### Tool: {name}\n\n" f"```json\n{inp_json}\n```"
+            if tu_id in tool_results:
+                matched.add(tu_id)
+                piece += (
+                    "\n\n<details><summary>result</summary>\n\n"
+                    f"{tool_results[tu_id]}\n\n"
+                    "</details>"
+                )
+            rendered.append(piece)
     if not rendered:
         return ""
     return "## Assistant\n\n" + "\n\n".join(rendered)
