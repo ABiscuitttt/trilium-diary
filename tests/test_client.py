@@ -701,23 +701,29 @@ class TestResolveJsonlPath:
     def test_explicit_session_and_project_dir(self, tmp_path):
         proj = tmp_path / "myproj"
         proj.mkdir()
-        path = resolve_jsonl_path("abc-123", str(proj))
+        path, sid = resolve_jsonl_path("abc-123", str(proj))
         slug = str(proj).replace("/", "-")
         assert path.endswith(f"{slug}/abc-123.jsonl")
+        assert sid == "abc-123"
 
     def test_falls_back_to_env(self, tmp_path, monkeypatch):
         proj = tmp_path / "p"
         proj.mkdir()
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "envsess")
         monkeypatch.chdir(proj)
-        path = resolve_jsonl_path(None, None)
+        path, sid = resolve_jsonl_path(None, None)
         assert path.endswith("envsess.jsonl")
+        assert sid == "envsess"
 
     def test_missing_session_exits(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
         monkeypatch.chdir(tmp_path)
         with pytest.raises(SystemExit):
             resolve_jsonl_path(None, None)
+
+    def test_invalid_session_id_exits(self, tmp_path):
+        with pytest.raises(SystemExit):
+            resolve_jsonl_path('bad"id', str(tmp_path))
 
 
 class TestCmdRecapCreate:
@@ -742,7 +748,7 @@ class TestCmdRecapCreate:
         # Patch the actual jsonl path resolution to return our fixture
         monkeypatch.setattr(
             "trilium.resolve_jsonl_path",
-            lambda s, p: str(jsonl),
+            lambda s, p: (str(jsonl), "sess"),
         )
 
         with patch.object(Trilium, "ensure_date_path", return_value="day123"), \
@@ -791,7 +797,7 @@ class TestCmdRecapUpdate:
 
         monkeypatch.setattr(
             "trilium.resolve_jsonl_path",
-            lambda s, p: str(jsonl),
+            lambda s, p: (str(jsonl), "sess"),
         )
 
         with patch.object(Trilium, "ensure_date_path", return_value="day"), \
@@ -825,7 +831,9 @@ class TestCmdRecapUpdate:
         args.session = "s"
         args.project_dir = str(tmp_path)
         args.date = None
-        monkeypatch.setattr("trilium.resolve_jsonl_path", lambda a, b: str(jsonl))
+        monkeypatch.setattr(
+            "trilium.resolve_jsonl_path", lambda a, b: (str(jsonl), "s")
+        )
         with patch.object(Trilium, "ensure_date_path", return_value="day"), \
              patch.object(Trilium, "find_session_note", return_value="eid"), \
              patch.object(Trilium, "update_note_content"), \

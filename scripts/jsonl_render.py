@@ -34,6 +34,22 @@ _IGNORE_TYPES = {
 }
 
 
+def _details_fold(summary: str, body: str) -> str:
+    """Wrap body in a collapsible <details> block."""
+    return f"<details><summary>{summary}</summary>\n\n{body}\n\n</details>"
+
+
+def _clean_text(block: dict) -> str | None:
+    """Strip system-reminder noise from a text block.
+
+    Returns None if the result is blank after stripping.
+    """
+    cleaned = _strip_reminders(block.get("text", ""))
+    if cleaned.strip():
+        return cleaned
+    return None
+
+
 def _tool_result_to_text(content) -> str:
     """Normalize tool_result.content to a string.
 
@@ -80,6 +96,7 @@ def render_records(records: list[dict]) -> str:
     tool_use blocks are rendered together with their paired tool_result
     (matched on tool_use_id). Orphan tool_results are listed at the end.
     """
+    records = list(records)  # materialise generators so we can iterate twice
     tool_results: dict[str, str] = {}
     for rec in records:
         if rec.get("type") != "user":
@@ -113,12 +130,7 @@ def render_records(records: list[dict]) -> str:
     if orphans:
         orphan_md = ["## Orphan tool results"]
         for tid, content in orphans:
-            orphan_md.append(
-                f"### {tid}\n\n"
-                "<details><summary>result</summary>\n\n"
-                f"{content}\n\n"
-                "</details>"
-            )
+            orphan_md.append(f"### {tid}\n\n" + _details_fold("result", content))
         parts.append("\n\n".join(orphan_md))
 
     if not parts:
@@ -136,9 +148,9 @@ def _render_user(rec: dict) -> str:
     texts: list[str] = []
     for block in _content_blocks(rec):
         if block.get("type") == "text":
-            cleaned = _strip_reminders(block.get("text", ""))
-            if cleaned.strip():
-                texts.append(cleaned)
+            text = _clean_text(block)
+            if text is not None:
+                texts.append(text)
     if not texts:
         return ""
     return "## User\n\n" + "\n\n".join(texts)
@@ -151,16 +163,12 @@ def _render_assistant(
     for block in _content_blocks(rec):
         btype = block.get("type")
         if btype == "text":
-            cleaned = _strip_reminders(block.get("text", ""))
-            if cleaned.strip():
-                rendered.append(cleaned)
+            text = _clean_text(block)
+            if text is not None:
+                rendered.append(text)
         elif btype == "thinking":
             content = block.get("thinking", "")
-            rendered.append(
-                "<details><summary>thinking</summary>\n\n"
-                f"{content}\n\n"
-                "</details>"
-            )
+            rendered.append(_details_fold("thinking", content))
         elif btype == "tool_use":
             name = block.get("name", "?")
             inp = block.get("input", {})
@@ -169,11 +177,7 @@ def _render_assistant(
             piece = f"### Tool: {name}\n\n" f"```json\n{inp_json}\n```"
             if tu_id in tool_results:
                 matched.add(tu_id)
-                piece += (
-                    "\n\n<details><summary>result</summary>\n\n"
-                    f"{tool_results[tu_id]}\n\n"
-                    "</details>"
-                )
+                piece += "\n\n" + _details_fold("result", tool_results[tu_id])
             rendered.append(piece)
     if not rendered:
         return ""
