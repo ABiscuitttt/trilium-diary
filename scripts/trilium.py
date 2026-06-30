@@ -235,6 +235,8 @@ class Trilium:
         """Find an existing recap note for the given session under day_id."""
         expr = f'note.parents.noteId="{day_id}" #sessionId="{session_id}"'
         for n in self.search(expr, limit="5"):
+            if day_id not in (n.get("parentNoteIds") or []):
+                continue
             attrs = n.get("attributes", []) or []
             if any(
                 a["name"] == "sessionId" and a["value"] == session_id

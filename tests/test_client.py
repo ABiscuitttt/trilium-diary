@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from trilium import (
+    RECAP_ICON,
     Trilium,
     cmd_add,
     cmd_check,
@@ -985,3 +986,8 @@ class TestCmdRecapCreate:
         assert "sessionId" in names
         assert "diaryDate" in names
         assert "iconClass" in names
+        # Verify iconClass value is RECAP_ICON
+        icon_call = next(
+            c for c in add_label.call_args_list if c.args[1] == "iconClass"
+        )
+        assert icon_call.args[2] == RECAP_ICON
