@@ -1,0 +1,3 @@
+{"type":"system","content":"ignored line"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"你好"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"回答"}]}}
