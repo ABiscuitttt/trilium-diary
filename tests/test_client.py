@@ -17,8 +17,10 @@ from trilium import (
     cmd_delete,
     cmd_get,
     cmd_list,
+    cmd_recap,
     cmd_update,
     load_config,
+    resolve_jsonl_path,
 )
 
 # ---------------------------------------------------------------------------
@@ -915,3 +917,71 @@ class TestCmdAddEditor:
             out = capsys.readouterr().out
             assert "task" in out
             mock_call.assert_called_once()
+
+
+class TestResolveJsonlPath:
+    def test_explicit_session_and_project_dir(self, tmp_path):
+        proj = tmp_path / "myproj"
+        proj.mkdir()
+        path = resolve_jsonl_path("abc-123", str(proj))
+        slug = str(proj).replace("/", "-")
+        assert path.endswith(f"{slug}/abc-123.jsonl")
+
+    def test_falls_back_to_env(self, tmp_path, monkeypatch):
+        proj = tmp_path / "p"
+        proj.mkdir()
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "envsess")
+        monkeypatch.chdir(proj)
+        path = resolve_jsonl_path(None, None)
+        assert path.endswith("envsess.jsonl")
+
+    def test_missing_session_exits(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(SystemExit):
+            resolve_jsonl_path(None, None)
+
+
+class TestCmdRecapCreate:
+    def test_creates_new_note_with_labels(self, tmp_path, monkeypatch, capsys):
+        # config
+        cfg_path = _make_config(tmp_path)
+        monkeypatch.setattr("trilium.CONFIG_PATH", cfg_path)
+
+        # jsonl fixture
+        jsonl = tmp_path / "sess.jsonl"
+        jsonl.write_text(
+            '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}\n',
+            encoding="utf-8",
+        )
+
+        args = MagicMock()
+        args.title_suffix = "重构设计"
+        args.session = "sess"
+        args.project_dir = str(tmp_path)
+        args.date = None
+
+        # Patch the actual jsonl path resolution to return our fixture
+        monkeypatch.setattr(
+            "trilium.resolve_jsonl_path",
+            lambda s, p: str(jsonl),
+        )
+
+        with patch.object(Trilium, "ensure_date_path", return_value="day123"), \
+             patch.object(Trilium, "find_session_note", return_value=None), \
+             patch.object(
+                 Trilium, "create_note",
+                 return_value={"note": {"noteId": "newnote"}},
+             ) as create, \
+             patch.object(Trilium, "add_label") as add_label:
+            cmd_recap(args)
+
+        create.assert_called_once()
+        # The note title is "Recap：重构设计"
+        assert create.call_args.args[1] == "Recap：重构设计"
+        # Labels: #diary, #sessionId=sess, #diaryDate=<today>, #iconClass=bx bx-conversation
+        names = [c.args[1] for c in add_label.call_args_list]
+        assert "diary" in names
+        assert "sessionId" in names
+        assert "diaryDate" in names
+        assert "iconClass" in names

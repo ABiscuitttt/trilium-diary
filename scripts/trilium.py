@@ -49,6 +49,22 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "..", "etc", "config.json")
 
 
+def resolve_jsonl_path(
+    session: str | None, project_dir: str | None
+) -> str:
+    """Compose ~/.claude/projects/<slug>/<session>.jsonl from env or args."""
+    sid = session or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if not sid:
+        die(
+            "缺少 sessionId。请用 --session <id> 显式指定，"
+            "或确保在 Claude Code 会话中（$CLAUDE_CODE_SESSION_ID）。"
+        )
+    pdir = project_dir or os.getcwd()
+    pdir_abs = os.path.abspath(pdir)
+    slug = pdir_abs.replace("/", "-")
+    return os.path.expanduser(f"~/.claude/projects/{slug}/{sid}.jsonl")
+
+
 def _get_version():
     """Read version from pyproject.toml (works with uv run and direct execution)."""
     import tomllib
@@ -69,6 +85,8 @@ TYPE_ICON = {
     "decision": "bx bx-traffic-cone",
     "learn": "bx bx-bulb",
 }
+
+RECAP_ICON = "bx bx-conversation"
 
 WEEKDAY_ZH = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 MONTH_EN = [
@@ -209,6 +227,18 @@ class Trilium:
             if parent_id in (n.get("parentNoteIds") or []) and any(
                 a["name"] == label and a["value"] == value
                 for a in n.get("attributes", [])
+            ):
+                return n["noteId"]
+        return None
+
+    def find_session_note(self, day_id: str, session_id: str) -> str | None:
+        """Find an existing recap note for the given session under day_id."""
+        expr = f'note.parents.noteId="{day_id}" #sessionId="{session_id}"'
+        for n in self.search(expr, limit="5"):
+            attrs = n.get("attributes", []) or []
+            if any(
+                a["name"] == "sessionId" and a["value"] == session_id
+                for a in attrs
             ):
                 return n["noteId"]
         return None
@@ -498,6 +528,57 @@ def cmd_update(args):
     print(f"  打开: {url}")
 
 
+def cmd_recap(args):
+    from jsonl_render import EmptyTranscriptError, render_jsonl
+
+    cfg = load_config()
+    t = Trilium(cfg)
+
+    jsonl_path = resolve_jsonl_path(
+        getattr(args, "session", None), getattr(args, "project_dir", None)
+    )
+    if not os.path.exists(jsonl_path):
+        die(f"找不到 session JSONL: {jsonl_path}")
+
+    try:
+        md = render_jsonl(jsonl_path)
+    except EmptyTranscriptError:
+        die(f"session JSONL 没有可渲染内容: {jsonl_path}")
+
+    date = parse_date(getattr(args, "date", None))
+    day_id = t.ensure_date_path(date)
+
+    suffix = getattr(args, "title_suffix", None)
+    title = f"Recap：{suffix}" if suffix else "Recap"
+
+    html = render_markdown(md)
+    session_id = (
+        getattr(args, "session", None) or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    )
+
+    existing = t.find_session_note(day_id, session_id)
+    if existing:
+        t.update_note_content(existing, html)
+        cur = t.get_note(existing)
+        if cur.get("title") != title:
+            t.update_note(existing, title=title)
+        nid = existing
+        action = "已更新"
+    else:
+        nid = t.create_note(day_id, title, html, ntype="text")["note"]["noteId"]
+        t.add_label(nid, "diary")
+        t.add_label(nid, "sessionId", session_id)
+        t.add_label(nid, "diaryDate", date.isoformat())
+        t.add_label(nid, "iconClass", RECAP_ICON)
+        action = "已写入"
+
+    url = "{}/#root/{}".format(cfg["server"], nid)
+    print(f"✓ {action}日历: {title}")
+    print(f"  日期: {date.isoformat()}（{WEEKDAY_ZH[date.weekday()]}）")
+    print(f"  noteId: {nid}")
+    print(f"  打开: {url}")
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="trilium.py", description="把工作日记写入 Trilium 日历"
@@ -539,6 +620,13 @@ def build_parser():
     pu.add_argument("--type", help="新类型: trap/work/decision/learn 或自定义")
     pu.add_argument("--content-file", help="新内容的 markdown 文件路径")
     pu.add_argument("--prefix", help="覆盖默认图标（Boxicons class）")
+
+    pr = sub.add_parser("recap", help="把当前 session JSONL 渲染并写入日历")
+    pr.add_argument("--title-suffix", help="标题后缀（Recap：<suffix>）")
+    pr.add_argument("--session", help="覆盖 sessionId，默认读 $CLAUDE_CODE_SESSION_ID")
+    pr.add_argument("--project-dir", help="覆盖项目目录，默认 $PWD")
+    pr.add_argument("--date", help="覆盖日期 YYYY-MM-DD，默认今天")
+
     return p
 
 
@@ -551,6 +639,7 @@ def main():
         "delete": cmd_delete,
         "get": cmd_get,
         "update": cmd_update,
+        "recap": cmd_recap,
     }[args.cmd](args)
 
 
