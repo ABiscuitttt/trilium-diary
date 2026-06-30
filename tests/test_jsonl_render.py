@@ -1,6 +1,5 @@
 """Tests for the JSONL → markdown renderer."""
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -9,8 +8,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+# Import the module under test after sys.path is set up above.
 from jsonl_render import EmptyTranscriptError, render_jsonl, render_records
-
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
