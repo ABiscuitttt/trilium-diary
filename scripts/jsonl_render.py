@@ -24,6 +24,25 @@ _IGNORE_TYPES = {
 }
 
 
+def _tool_result_to_text(content) -> str:
+    """Normalize tool_result.content to a string.
+
+    Claude API sends either a plain string or a list of typed content
+    blocks like [{"type": "text", "text": "..."}, ...].
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(item.get("text", ""))
+        return "\n\n".join(parts)
+    return ""
+
+
 def render_jsonl(path: str) -> str:
     """Read a JSONL file and return the rendered markdown."""
     records: list[dict] = []
@@ -59,7 +78,7 @@ def render_records(records: list[dict]) -> str:
             if block.get("type") == "tool_result":
                 tid = block.get("tool_use_id")
                 if tid:
-                    tool_results[tid] = block.get("content", "")
+                    tool_results[tid] = _tool_result_to_text(block.get("content"))
 
     matched: set[str] = set()
     parts: list[str] = []

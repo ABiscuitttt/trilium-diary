@@ -134,7 +134,7 @@ class TestTool:
         md = render_records(records)
         # tool_result must appear after the tool_use it pairs with, not
         # as a stray "## User" section
-        assert "## User" not in md or md.count("## User") == 0
+        assert "## User" not in md
         assert "<details><summary>result</summary>" in md
         assert "etc" in md
         assert md.index("### Tool: Bash") < md.index(
@@ -162,3 +162,56 @@ class TestTool:
         assert "orphaned" in md
         assert "## Orphan tool results" in md
         assert md.index("你好") < md.index("orphaned")
+
+
+class TestToolContentShapes:
+    def test_null_content_renders_as_empty(self):
+        records = [
+            _assistant_blocks(
+                {"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}
+            ),
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": None,
+                        }
+                    ],
+                },
+            },
+        ]
+        md = render_records(records)
+        assert "None" not in md
+        assert "<details><summary>result</summary>" in md
+
+    def test_list_content_renders_text_parts(self):
+        records = [
+            _assistant_blocks(
+                {"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}
+            ),
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": [
+                                {"type": "text", "text": "first"},
+                                {"type": "text", "text": "second"},
+                            ],
+                        }
+                    ],
+                },
+            },
+        ]
+        md = render_records(records)
+        assert "first" in md
+        assert "second" in md
+        # repr-style brackets should not appear
+        assert "[{" not in md
