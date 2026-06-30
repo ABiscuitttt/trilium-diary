@@ -11,23 +11,24 @@ Targets the built-in Journal/calendar (a `book` note tagged #calendarRoot):
       └─ YYYY            #yearNote=YYYY
          └─ MM - Mon     #monthNote=YYYY-MM
             └─ DD - 周X   #dateNote=YYYY-MM-DD     (day note)
-               └─ 标题  #iconClass="bx bx-bug-alt"     (entry, child of day note)
+               └─ 标题  #iconClass="bx bx-conversation"  (entry, child of day note)
 
 Year/month/day nodes are found-or-created by their calendar labels (idempotent),
 so they match what Trilium itself recognizes. Entries are plain child notes of
 the date note (no #startDate — that would render as a pinned all-day event bar
-above the day title). Entries carry #diary / #diaryType / #diaryDate for filtering.
+above the day title). Entries carry #diary / #sessionId / #diaryDate / #iconClass
+for filtering.
 
 Markdown is rendered to HTML locally (Trilium text notes store HTML; the internal
 render-markdown endpoint rejects ETAPI tokens). Deps managed by uv.
 
 Commands:
     check                       verify server + token, locate the calendar root
-    add --type T --title S      create an entry (content from --content-file/stdin)
     get NOTE_ID                 show entry details (--content for full content)
-    update NOTE_ID [--title ..] modify entry title/type/content
+    update NOTE_ID [--title ..] modify entry title/content
     delete NOTE_ID              delete an entry by note id
     list [--date YYYY-MM-DD]    list diary entries
+    recap [--title-suffix ..]   render session JSONL and write to calendar
 
 Run directly (uv resolves deps):  ./trilium.py check
 """
@@ -36,9 +37,8 @@ import argparse
 import datetime as _dt
 import json
 import os
-import subprocess
+import re
 import sys
-import tempfile
 
 import markdown
 import requests
@@ -47,6 +47,35 @@ from urllib3.util.retry import Retry
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "..", "etc", "config.json")
+
+# Permissive enough to allow UUIDs and agent ids like a3eebab8e916c82ee,
+# but rejects chars that could break ETAPI search expressions (quotes, spaces, etc.)
+_SESSION_ID_RE = re.compile(r"^[0-9a-zA-Z._-]+$")
+
+
+def resolve_jsonl_path(
+    session: str | None, project_dir: str | None
+) -> tuple[str, str]:
+    """Compose ~/.claude/projects/<slug>/<session>.jsonl from env or args.
+
+    Returns (path, sid) so callers have a single authoritative source for
+    the session id without re-deriving it from the environment.
+    """
+    sid = session or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if not sid:
+        die(
+            "缺少 sessionId。请用 --session <id> 显式指定，"
+            "或确保在 Claude Code 会话中（$CLAUDE_CODE_SESSION_ID）。"
+        )
+    if not _SESSION_ID_RE.match(sid):
+        die(
+            f"sessionId 格式非法（应只含字母、数字、点、下划线、短划线）: {sid!r}"
+        )
+    pdir = project_dir or os.getcwd()
+    pdir_abs = os.path.abspath(pdir)
+    slug = pdir_abs.replace("/", "-")
+    path = os.path.expanduser(f"~/.claude/projects/{slug}/{sid}.jsonl")
+    return path, sid
 
 
 def _get_version():
@@ -60,15 +89,7 @@ def _get_version():
     except (FileNotFoundError, KeyError):
         return "unknown"
 
-# Boxicons class for each diary type, applied via #iconClass label.
-# Trilium natively renders #iconClass in the note tree and calendar view.
-# See https://boxicons.com/ for the full icon set.
-TYPE_ICON = {
-    "trap": "bx bx-bug-alt",
-    "work": "bx bx-package",
-    "decision": "bx bx-traffic-cone",
-    "learn": "bx bx-bulb",
-}
+RECAP_ICON = "bx bx-conversation"
 
 WEEKDAY_ZH = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 MONTH_EN = [
@@ -213,6 +234,20 @@ class Trilium:
                 return n["noteId"]
         return None
 
+    def find_session_note(self, day_id: str, session_id: str) -> str | None:
+        """Find an existing recap note for the given session under day_id."""
+        expr = f'note.parents.noteId="{day_id}" #sessionId="{session_id}"'
+        for n in self.search(expr, limit="5"):
+            if day_id not in (n.get("parentNoteIds") or []):
+                continue
+            attrs = n.get("attributes", []) or []
+            if any(
+                a["name"] == "sessionId" and a["value"] == session_id
+                for a in attrs
+            ):
+                return n["noteId"]
+        return None
+
     def ensure_year(self, root_id, date):
         val = f"{date.year:04d}"
         found = self._child_with_label(root_id, "yearNote", val)
@@ -265,14 +300,6 @@ def render_markdown(text):
     )
 
 
-def resolve_icon(ntype, override):
-    """Return the Boxicons class for the given type, or the override if provided."""
-    if override is not None:
-        # --prefix is repurposed as --icon override; keep backward compat
-        return override
-    return TYPE_ICON.get(ntype, "")
-
-
 def parse_date(s):
     if not s:
         return _dt.date.today()
@@ -312,59 +339,6 @@ def cmd_check(args):
         print("✓ 日历根笔记验证通过（#calendarRoot 标签存在）")
     else:
         print("⚠️  日历根笔记缺少 #calendarRoot 标签，日历功能可能异常")
-
-
-def _read_content(content_file):
-    """Read markdown content from file, stdin (pipe), or $EDITOR."""
-    if content_file:
-        with open(content_file, encoding="utf-8") as f:
-            md = f.read()
-    elif not sys.stdin.isatty():
-        md = sys.stdin.read()
-    else:
-        # No content provided and stdin is a terminal — open $EDITOR
-        editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "vi"))
-        fd, tmp = tempfile.mkstemp(suffix=".md")
-        try:
-            os.close(fd)
-            subprocess.call([editor, tmp])
-            with open(tmp, encoding="utf-8") as f:
-                md = f.read()
-        finally:
-            os.unlink(tmp)
-    if not md.strip():
-        die("内容为空：用 --content-file 指定 md 文件，或通过 stdin 传入")
-    return md
-
-
-def cmd_add(args):
-    cfg = load_config()
-    t = Trilium(cfg)
-    md = _read_content(args.content_file)
-
-    date = parse_date(args.date)
-    day_id = t.ensure_date_path(date)
-
-    html = render_markdown(md)
-    nid = t.create_note(day_id, args.title, html, ntype="text")["note"]["noteId"]
-    # The entry shows in the calendar cell simply by being a child of the
-    # #dateNote day note (same as Trilium's native day entries). We deliberately
-    # do NOT add #startDate — that would render it as an all-day event bar
-    # pinned above the day title. #diaryDate is a plain label for our own
-    # filtering and does not affect calendar layout.
-    t.add_label(nid, "diary")
-    t.add_label(nid, "diaryType", args.type)
-    t.add_label(nid, "diaryDate", date.isoformat())
-    # Set Boxicons icon via #iconClass (rendered in tree & calendar by Trilium).
-    icon = resolve_icon(args.type, getattr(args, "prefix", None))
-    if icon:
-        t.add_label(nid, "iconClass", icon)
-
-    url = "{}/#root/{}".format(cfg["server"], nid)
-    print(f"✓ 已写入日历: {args.title}")
-    print(f"  日期: {date.isoformat()}（{WEEKDAY_ZH[date.weekday()]}）")
-    print(f"  noteId: {nid}")
-    print(f"  打开: {url}")
 
 
 def cmd_list(args):
@@ -410,18 +384,12 @@ def cmd_delete(args):
     t = Trilium(cfg)
     note = t.get_note(args.note_id)
     # Show what will be deleted
-    diary_type = next(
-        (a["value"] for a in note.get("attributes", []) if a["name"] == "diaryType"),
-        "",
-    )
     diary_date = next(
         (a["value"] for a in note.get("attributes", []) if a["name"] == "diaryDate"),
         "",
     )
     title = note.get("title", "")
     info_parts = [f"  标题: {title}"]
-    if diary_type:
-        info_parts.append(f"  类型: {diary_type}")
     if diary_date:
         info_parts.append(f"  日期: {diary_date}")
     print("即将删除：")
@@ -457,13 +425,10 @@ def cmd_get(args):
 def cmd_update(args):
     cfg = load_config()
     t = Trilium(cfg)
-    note = t.get_note(args.note_id)
 
-    # Update title if --title provided
     if args.title is not None:
         t.update_note(args.note_id, title=args.title)
 
-    # Update content if --content-file provided or stdin piped
     if args.content_file:
         with open(args.content_file, encoding="utf-8") as f:
             md = f.read()
@@ -477,24 +442,57 @@ def cmd_update(args):
             html = render_markdown(md)
             t.update_note_content(args.note_id, html)
 
-    # Update type label and icon if --type provided
-    if args.type is not None:
-        type_attr = _get_attr(note, "diaryType")
-        if type_attr:
-            t.patch_attribute(type_attr["attributeId"], value=args.type)
-        # Update #iconClass to match new type
-        icon = resolve_icon(args.type, getattr(args, "prefix", None))
-        icon_attr = _get_attr(note, "iconClass")
-        if icon_attr:
-            t.patch_attribute(icon_attr["attributeId"], value=icon)
-        elif icon:
-            t.add_label(args.note_id, "iconClass", icon)
-
-    # Show result
     updated = t.get_note(args.note_id)
     print(f"✓ 已更新: {updated.get('title', '')}")
     print(f"  noteId: {args.note_id}")
     url = "{}/#root/{}".format(cfg["server"], args.note_id)
+    print(f"  打开: {url}")
+
+
+def cmd_recap(args):
+    from jsonl_render import EmptyTranscriptError, render_jsonl
+
+    cfg = load_config()
+    t = Trilium(cfg)
+
+    jsonl_path, session_id = resolve_jsonl_path(
+        getattr(args, "session", None), getattr(args, "project_dir", None)
+    )
+    if not os.path.exists(jsonl_path):
+        die(f"找不到 session JSONL: {jsonl_path}")
+
+    try:
+        md = render_jsonl(jsonl_path)
+    except EmptyTranscriptError:
+        die(f"session JSONL 没有可渲染内容: {jsonl_path}")
+
+    date = parse_date(getattr(args, "date", None))
+    day_id = t.ensure_date_path(date)
+
+    suffix = getattr(args, "title_suffix", None)
+    title = f"Recap：{suffix}" if suffix else "Recap"
+
+    html = render_markdown(md)
+
+    existing = t.find_session_note(day_id, session_id)
+    if existing:
+        t.update_note_content(existing, html)
+        cur = t.get_note(existing)
+        if cur.get("title") != title:
+            t.update_note(existing, title=title)
+        nid = existing
+        action = "已更新"
+    else:
+        nid = t.create_note(day_id, title, html, ntype="text")["note"]["noteId"]
+        t.add_label(nid, "diary")
+        t.add_label(nid, "sessionId", session_id)
+        t.add_label(nid, "diaryDate", date.isoformat())
+        t.add_label(nid, "iconClass", RECAP_ICON)
+        action = "已创建"
+
+    print(f"✓ {action}: {title}")
+    print(f"  noteId: {nid}")
+    url = "{}/#root/{}".format(cfg["server"], nid)
     print(f"  打开: {url}")
 
 
@@ -506,15 +504,6 @@ def build_parser():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("check", help="检查服务器、token、日历根")
-
-    pa = sub.add_parser("add", help="新增一条日记条目（挂到当天日历）")
-    pa.add_argument(
-        "--type", required=True, help="类型: trap/work/decision/learn 或自定义"
-    )
-    pa.add_argument("--title", required=True, help="条目标题")
-    pa.add_argument("--date", help="日期 YYYY-MM-DD，默认今天")
-    pa.add_argument("--content-file", help="markdown 文件路径；省略则读 stdin")
-    pa.add_argument("--prefix", help="覆盖默认图标（Boxicons class，如 bx bx-star）")
 
     pl = sub.add_parser("list", help="列出日记条目")
     pl.add_argument("--date", help="只列某天 YYYY-MM-DD")
@@ -536,9 +525,14 @@ def build_parser():
     pu = sub.add_parser("update", help="修改一条日记")
     pu.add_argument("note_id", help="笔记 ID")
     pu.add_argument("--title", help="新标题")
-    pu.add_argument("--type", help="新类型: trap/work/decision/learn 或自定义")
     pu.add_argument("--content-file", help="新内容的 markdown 文件路径")
-    pu.add_argument("--prefix", help="覆盖默认图标（Boxicons class）")
+
+    pr = sub.add_parser("recap", help="把当前 session JSONL 渲染并写入日历")
+    pr.add_argument("--title-suffix", help="标题后缀（Recap：<suffix>）")
+    pr.add_argument("--session", help="覆盖 sessionId，默认读 $CLAUDE_CODE_SESSION_ID")
+    pr.add_argument("--project-dir", help="覆盖项目目录，默认 $PWD")
+    pr.add_argument("--date", help="覆盖日期 YYYY-MM-DD，默认今天")
+
     return p
 
 
@@ -546,11 +540,11 @@ def main():
     args = build_parser().parse_args()
     {
         "check": cmd_check,
-        "add": cmd_add,
         "list": cmd_list,
         "delete": cmd_delete,
         "get": cmd_get,
         "update": cmd_update,
+        "recap": cmd_recap,
     }[args.cmd](args)
 
 

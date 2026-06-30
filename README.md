@@ -1,7 +1,8 @@
 # trilium-diary
 
-把开发过程中的关键节点（踩坑、工作里程碑、技术决策、学习笔记）以 markdown 形式记入
-[Trilium Notes](https://github.com/zadam/trilium) 的日历 / Journal 面板。
+把当前 Claude Code 会话的对话 JSONL 忠实渲染成 markdown，写入
+[Trilium Notes](https://github.com/zadam/trilium) 的日历 / Journal 面板，
+标题以 `Recap` 开头。
 
 ## 安装
 
@@ -19,7 +20,7 @@ git clone https://github.com/<user>/trilium-diary.git ~/.claude/skills/trilium-d
 cp etc/config.example.json etc/config.json
 ```
 
-编辑 `etc/config.json`，填入你的 Trilium 服务器地址、ETAPI token 和日历根笔记 ID。
+编辑 `etc/config.json`，填入 Trilium 服务器地址、ETAPI token 和日历根笔记 ID。
 
 ## 使用
 
@@ -27,44 +28,27 @@ cp etc/config.example.json etc/config.json
 # 检查连通性（含日历根标签验证）
 ./scripts/trilium.py check
 
-# 写入一条日记（heredoc stdin，推荐）
-./scripts/trilium.py add --type work --title "联调通过" <<'EOF'
-## 背景
-前后端联调完成
+# 写入当前 session 的 recap
+./scripts/trilium.py recap --title-suffix "联调通过"
 
-## 结果
-所有接口跑通
-EOF
-
-# 写入一条日记（简短内容可用 echo + pipe）
-echo '## 背景\n...\n## 结果\n...' | \
-  ./scripts/trilium.py add --type work --title "联调通过"
-
-# 写入一条日记（交互式编辑器）
-./scripts/trilium.py add --type learn --title "学会了 retry 机制"
-
-# 列出日记（文本格式）
-./scripts/trilium.py list --date 2026-05-29
-
-# 列出日记（JSON 格式）
+# 列出日记
+./scripts/trilium.py list --date 2026-06-30
 ./scripts/trilium.py list --format json
 
-# 修改内容（heredoc stdin）
-./scripts/trilium.py update <noteId> <<'EOF'
-## 新内容
-更新后的 markdown...
-EOF
+# 查看 / 修改 / 删除
+./scripts/trilium.py get <noteId> --content
+./scripts/trilium.py update <noteId> --title "新标题"
+./scripts/trilium.py delete <noteId>
 ```
-
-`--type` 选项：`trap`（踩坑）、`work`（工作）、`decision`（决策）、`learn`（学习）。图标通过 `#iconClass` 标签（Boxicons）自动设置。
 
 ## 功能特性
 
+- **忠实记录**：直接读 session JSONL 渲染成 markdown，含 user/assistant 文本、thinking 折叠、tool 调用与结果
+- **幂等覆盖**：同 session 同天的 recap 覆盖已有笔记，不重复创建
+- **自动定位**：默认读 `$CLAUDE_CODE_SESSION_ID` 与 `$PWD`，无需手动传 sessionId
 - **网络重试**：自动对 502/503/504 错误重试 3 次，指数退避
 - **ETAPI 日历端点**：配置 `calendarRootId` 后直接使用 `/calendar/days/{date}` API
-- **交互式编辑**：`add` 不传内容时自动打开 `$EDITOR`
 - **JSON 输出**：`list --format json` 便于程序化处理
-- **增强校验**：`check` 验证日历根笔记的 `#calendarRoot` 标签
 
 ## 依赖
 
