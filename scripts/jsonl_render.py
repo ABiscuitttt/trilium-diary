@@ -6,11 +6,21 @@ Pure functions only — no IO except `render_jsonl(path)` which reads the file.
 from __future__ import annotations
 
 import json
+import re
 import sys
 
 
 class EmptyTranscriptError(ValueError):
     """Raised when the JSONL contains no renderable content."""
+
+
+_SYS_REMINDER_RE = re.compile(
+    r"<system-reminder>.*?</system-reminder>", re.DOTALL
+)
+
+
+def _strip_reminders(text: str) -> str:
+    return _SYS_REMINDER_RE.sub("", text)
 
 
 _IGNORE_TYPES = {
@@ -126,7 +136,9 @@ def _render_user(rec: dict) -> str:
     texts: list[str] = []
     for block in _content_blocks(rec):
         if block.get("type") == "text":
-            texts.append(block.get("text", ""))
+            cleaned = _strip_reminders(block.get("text", ""))
+            if cleaned.strip():
+                texts.append(cleaned)
     if not texts:
         return ""
     return "## User\n\n" + "\n\n".join(texts)
@@ -139,7 +151,9 @@ def _render_assistant(
     for block in _content_blocks(rec):
         btype = block.get("type")
         if btype == "text":
-            rendered.append(block.get("text", ""))
+            cleaned = _strip_reminders(block.get("text", ""))
+            if cleaned.strip():
+                rendered.append(cleaned)
         elif btype == "thinking":
             content = block.get("thinking", "")
             rendered.append(

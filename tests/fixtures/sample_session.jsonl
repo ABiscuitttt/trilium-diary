@@ -1,3 +1,7 @@
 {"type":"system","content":"ignored line"}
-{"type":"user","message":{"role":"user","content":[{"type":"text","text":"你好"}]}}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"回答"}]}}
+{"type":"mode","mode":"normal"}
+{"type":"permission-mode","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"列出文件"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"先看一下结构"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"etc\nscripts","is_error":false}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"项目里有 etc 与 scripts。"}]}}

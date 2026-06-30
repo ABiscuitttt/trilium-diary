@@ -68,6 +68,21 @@ class TestFixture:
         assert "## User" in md
         assert "## Assistant" in md
 
+    def test_fixture_contains_all_block_types(self):
+        path = FIXTURE_DIR / "sample_session.jsonl"
+        md = render_jsonl(str(path))
+        assert "## User" in md
+        assert "## Assistant" in md
+        assert "### Tool: Bash" in md
+        assert "<details><summary>thinking</summary>" in md
+        assert "<details><summary>result</summary>" in md
+
+    def test_fixture_ignores_system_and_mode_lines(self):
+        path = FIXTURE_DIR / "sample_session.jsonl"
+        md = render_jsonl(str(path))
+        assert "ignored line" not in md
+        assert "permission-mode" not in md
+
 
 class TestEmpty:
     def test_empty_records_raises(self):
@@ -215,3 +230,24 @@ class TestToolContentShapes:
         assert "second" in md
         # repr-style brackets should not appear
         assert "[{" not in md
+
+
+class TestStripSystemReminder:
+    def test_strips_inline_system_reminder(self):
+        rec = _user("你好<system-reminder>\n请记住 X\n</system-reminder>之后")
+        md = render_records([rec])
+        assert "你好" in md
+        assert "之后" in md
+        assert "请记住 X" not in md
+        assert "system-reminder" not in md
+
+    def test_strips_multiple_reminders(self):
+        rec = _user(
+            "a<system-reminder>x</system-reminder>b"
+            "<system-reminder>y</system-reminder>c"
+        )
+        md = render_records([rec])
+        assert "x" not in md
+        assert "y" not in md
+        assert "a" in md and "b" in md and "c" in md
+
