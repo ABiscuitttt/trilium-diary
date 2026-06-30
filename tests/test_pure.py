@@ -1,4 +1,4 @@
-"""Tests for pure functions: render_markdown, resolve_icon, parse_date."""
+"""Tests for pure functions: render_markdown, parse_date."""
 
 import datetime as _dt
 import os
@@ -14,12 +14,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 # The script calls sys.exit on errors via die(), which we want to catch.
 from trilium import (
     MONTH_EN,
-    TYPE_ICON,
     WEEKDAY_ZH,
     build_parser,
     parse_date,
     render_markdown,
-    resolve_icon,
 )
 
 
@@ -86,29 +84,6 @@ class TestRenderMarkdown:
 
 
 # ---------------------------------------------------------------------------
-# resolve_icon
-# ---------------------------------------------------------------------------
-class TestResolveIcon:
-    def test_known_types(self):
-        assert resolve_icon("trap", None) == "bx bx-bug-alt"
-        assert resolve_icon("work", None) == "bx bx-package"
-        assert resolve_icon("decision", None) == "bx bx-traffic-cone"
-        assert resolve_icon("learn", None) == "bx bx-bulb"
-
-    def test_unknown_type_no_override(self):
-        assert resolve_icon("custom", None) == ""
-
-    def test_override_takes_precedence(self):
-        assert resolve_icon("trap", "bx bx-star") == "bx bx-star"
-
-    def test_override_empty_string(self):
-        assert resolve_icon("trap", "") == ""
-
-    def test_override_for_unknown_type(self):
-        assert resolve_icon("custom", "bx bx-custom") == "bx bx-custom"
-
-
-# ---------------------------------------------------------------------------
 # parse_date
 # ---------------------------------------------------------------------------
 class TestParseDate:
@@ -138,11 +113,6 @@ class TestParseDate:
 # Constants sanity
 # ---------------------------------------------------------------------------
 class TestConstants:
-    def test_type_icon_values(self):
-        assert set(TYPE_ICON.keys()) == {"trap", "work", "decision", "learn"}
-        for v in TYPE_ICON.values():
-            assert v.startswith("bx ")
-
     def test_weekday_zh_seven_days(self):
         assert len(WEEKDAY_ZH) == 7
 
@@ -155,41 +125,10 @@ class TestConstants:
 # build_parser
 # ---------------------------------------------------------------------------
 class TestBuildParser:
-    def test_add_requires_type_and_title(self):
+    def test_no_subcommand_exits(self):
         p = build_parser()
         with pytest.raises(SystemExit):
-            p.parse_args(["add"])
-
-    def test_add_parses_all_options(self):
-        p = build_parser()
-        args = p.parse_args(
-            [
-                "add",
-                "--type",
-                "trap",
-                "--title",
-                "bug fix",
-                "--date",
-                "2026-06-01",
-                "--content-file",
-                "/tmp/note.md",
-                "--prefix",
-                "🔥",
-            ]
-        )
-        assert args.cmd == "add"
-        assert args.type == "trap"
-        assert args.title == "bug fix"
-        assert args.date == "2026-06-01"
-        assert args.content_file == "/tmp/note.md"
-        assert args.prefix == "🔥"
-
-    def test_add_defaults(self):
-        p = build_parser()
-        args = p.parse_args(["add", "--type", "work", "--title", "t"])
-        assert args.date is None
-        assert args.content_file is None
-        assert args.prefix is None
+            p.parse_args([])
 
     def test_list_defaults(self):
         p = build_parser()
@@ -202,11 +141,6 @@ class TestBuildParser:
         args = p.parse_args(["list", "--date", "2026-06-01", "--limit", "10"])
         assert args.date == "2026-06-01"
         assert args.limit == 10
-
-    def test_no_subcommand_exits(self):
-        p = build_parser()
-        with pytest.raises(SystemExit):
-            p.parse_args([])
 
     def test_delete_parses_note_id(self):
         p = build_parser()
@@ -231,15 +165,13 @@ class TestBuildParser:
         args = p.parse_args(["get", "n1", "--content"])
         assert args.content is True
 
-    def test_update_parses_note_id_and_options(self):
+    def test_update_parses_note_id_and_title(self):
         p = build_parser()
-        args = p.parse_args(["update", "n1", "--title", "new", "--type", "work"])
+        args = p.parse_args(["update", "n1", "--title", "new"])
         assert args.cmd == "update"
         assert args.note_id == "n1"
         assert args.title == "new"
-        assert args.type == "work"
         assert args.content_file is None
-        assert args.prefix is None
 
     def test_update_with_content_file(self):
         p = build_parser()
@@ -250,5 +182,33 @@ class TestBuildParser:
         p = build_parser()
         args = p.parse_args(["update", "n1"])
         assert args.title is None
-        assert args.type is None
         assert args.content_file is None
+
+    def test_recap_no_args(self):
+        p = build_parser()
+        args = p.parse_args(["recap"])
+        assert args.cmd == "recap"
+        assert args.title_suffix is None
+        assert args.session is None
+        assert args.project_dir is None
+        assert args.date is None
+
+    def test_recap_with_all_args(self):
+        p = build_parser()
+        args = p.parse_args(
+            [
+                "recap",
+                "--title-suffix",
+                "重构",
+                "--session",
+                "abc",
+                "--project-dir",
+                "/tmp/p",
+                "--date",
+                "2026-06-30",
+            ]
+        )
+        assert args.title_suffix == "重构"
+        assert args.session == "abc"
+        assert args.project_dir == "/tmp/p"
+        assert args.date == "2026-06-30"
