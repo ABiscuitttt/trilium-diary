@@ -11,12 +11,13 @@ Targets the built-in Journal/calendar (a `book` note tagged #calendarRoot):
       └─ YYYY            #yearNote=YYYY
          └─ MM - Mon     #monthNote=YYYY-MM
             └─ DD - 周X   #dateNote=YYYY-MM-DD     (day note)
-               └─ 标题  #iconClass="bx bx-bug-alt"     (entry, child of day note)
+               └─ 标题  #iconClass="bx bx-conversation"  (entry, child of day note)
 
 Year/month/day nodes are found-or-created by their calendar labels (idempotent),
 so they match what Trilium itself recognizes. Entries are plain child notes of
 the date note (no #startDate — that would render as a pinned all-day event bar
-above the day title). Entries carry #diary / #diaryType / #diaryDate for filtering.
+above the day title). Entries carry #diary / #sessionId / #diaryDate / #iconClass
+for filtering.
 
 Markdown is rendered to HTML locally (Trilium text notes store HTML; the internal
 render-markdown endpoint rejects ETAPI tokens). Deps managed by uv.
@@ -369,18 +370,12 @@ def cmd_delete(args):
     t = Trilium(cfg)
     note = t.get_note(args.note_id)
     # Show what will be deleted
-    diary_type = next(
-        (a["value"] for a in note.get("attributes", []) if a["name"] == "diaryType"),
-        "",
-    )
     diary_date = next(
         (a["value"] for a in note.get("attributes", []) if a["name"] == "diaryDate"),
         "",
     )
     title = note.get("title", "")
     info_parts = [f"  标题: {title}"]
-    if diary_type:
-        info_parts.append(f"  类型: {diary_type}")
     if diary_date:
         info_parts.append(f"  日期: {diary_date}")
     print("即将删除：")

@@ -376,7 +376,7 @@ class TestCmdDelete:
             cmd_delete(args)
             out = capsys.readouterr().out
             assert "🪤 · some bug" in out
-            assert "trap" in out
+            assert "trap" not in out
             assert "2026-06-01" in out
             assert "✓ 已删除" in out
             inst.delete_note.assert_called_once_with("abc123")
