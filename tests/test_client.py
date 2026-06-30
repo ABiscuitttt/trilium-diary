@@ -979,7 +979,7 @@ class TestCmdRecapCreate:
         create.assert_called_once()
         # The note title is "Recap：重构设计"
         assert create.call_args.args[1] == "Recap：重构设计"
-        # Labels: #diary, #sessionId=sess, #diaryDate=<today>, #iconClass=bx bx-conversation
+        # Labels: #diary, #sessionId=sess, #diaryDate=<today>, #iconClass
         names = [c.args[1] for c in add_label.call_args_list]
         assert "diary" in names
         assert "sessionId" in names
