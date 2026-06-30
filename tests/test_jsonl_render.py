@@ -76,6 +76,9 @@ class TestFixture:
         assert "### Tool: Bash" in md
         assert "<details><summary>thinking</summary>" in md
         assert "<details><summary>result</summary>" in md
+        # Ensure the strip helper does not erase legitimate text
+        assert "列出文件" in md
+        assert "项目里有 etc 与 scripts。" in md
 
     def test_fixture_ignores_system_and_mode_lines(self):
         path = FIXTURE_DIR / "sample_session.jsonl"
@@ -250,4 +253,9 @@ class TestStripSystemReminder:
         assert "x" not in md
         assert "y" not in md
         assert "a" in md and "b" in md and "c" in md
+
+    def test_only_reminder_text_raises_empty(self):
+        rec = _user("<system-reminder>only this</system-reminder>")
+        with pytest.raises(EmptyTranscriptError):
+            render_records([rec])
 
