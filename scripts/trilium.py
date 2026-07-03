@@ -3,32 +3,17 @@
 # requires-python = ">=3.12"
 # dependencies = ["markdown>=3.5", "requests>=2.31"]
 # ///
-"""trilium-diary: write markdown dev-diary entries into Trilium's calendar.
-
-Targets the built-in Journal/calendar (a `book` note tagged #calendarRoot):
-
-    Journal (#calendarRoot)
-      └─ YYYY            #yearNote=YYYY
-         └─ MM - Mon     #monthNote=YYYY-MM
-            └─ DD - 周X   #dateNote=YYYY-MM-DD     (day note)
-               └─ 标题  #iconClass="bx bx-conversation"  (entry, child of day note)
-
-Year/month/day nodes are found-or-created by their calendar labels (idempotent),
-so they match what Trilium itself recognizes. Entries are plain child notes of
-the date note (no #startDate — that would render as a pinned all-day event bar
-above the day title). Entries carry #diary / #sessionId / #diaryDate / #iconClass
-for filtering.
-
-Markdown is rendered to HTML locally (Trilium text notes store HTML; the internal
-render-markdown endpoint rejects ETAPI tokens). Deps managed by uv.
+"""trilium-diary: write knowledge notes into Trilium.
 
 Commands:
-    check                       verify server + token, locate the calendar root
-    get NOTE_ID                 show entry details (--content for full content)
-    update NOTE_ID [--title ..] modify entry title/content
-    delete NOTE_ID              delete an entry by note id
-    list [--date YYYY-MM-DD]    list diary entries
-    recap [--title-suffix ..]   render session JSONL and write to calendar
+    check                       verify server + token, locate roots and type nodes
+    note {til,idea,ref}         write a knowledge note
+    note topics                 list all topics
+    note merge-topic            merge one topic into another
+    get NOTE_ID                 show note details (--content for full content)
+    update NOTE_ID [--title ..] modify note title/icon
+    delete NOTE_ID              delete a note by note id
+    list [--type ..] [--topic ..] list knowledge notes
 
 Run directly (uv resolves deps):  ./trilium.py check
 """
@@ -37,7 +22,6 @@ import argparse
 import datetime as _dt
 import json
 import os
-import re
 import sys
 
 import markdown
@@ -47,36 +31,6 @@ from urllib3.util.retry import Retry
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "..", "etc", "config.json")
-
-# Permissive enough to allow UUIDs and agent ids like a3eebab8e916c82ee,
-# but rejects chars that could break ETAPI search expressions (quotes, spaces, etc.)
-_SESSION_ID_RE = re.compile(r"^[0-9a-zA-Z._-]+$")
-
-
-def resolve_jsonl_path(
-    session: str | None, project_dir: str | None
-) -> tuple[str, str]:
-    """Compose ~/.claude/projects/<slug>/<session>.jsonl from env or args.
-
-    Returns (path, sid) so callers have a single authoritative source for
-    the session id without re-deriving it from the environment.
-    """
-    sid = session or os.environ.get("CLAUDE_CODE_SESSION_ID")
-    if not sid:
-        die(
-            "缺少 sessionId。请用 --session <id> 显式指定，"
-            "或确保在 Claude Code 会话中（$CLAUDE_CODE_SESSION_ID）。"
-        )
-    if not _SESSION_ID_RE.match(sid):
-        die(
-            f"sessionId 格式非法（应只含字母、数字、点、下划线、短划线）: {sid!r}"
-        )
-    pdir = project_dir or os.getcwd()
-    pdir_abs = os.path.abspath(pdir)
-    slug = pdir_abs.replace("/", "-")
-    path = os.path.expanduser(f"~/.claude/projects/{slug}/{sid}.jsonl")
-    return path, sid
-
 
 def _get_version():
     """Read version from pyproject.toml (works with uv run and direct execution)."""
@@ -89,7 +43,6 @@ def _get_version():
     except (FileNotFoundError, KeyError):
         return "unknown"
 
-RECAP_ICON = "bx bx-conversation"
 TYPE_DISPLAY_NAMES = {"til": "TIL", "idea": "Ideas", "ref": "References"}
 TYPE_DEFAULT_ICONS = {
     "til": "bx bx-bulb",
@@ -305,7 +258,7 @@ class Trilium:
         note = self.get_note(note_id)
         branch_ids = note.get("parentBranchIds") or []
         parent_ids = note.get("parentNoteIds") or []
-        for bid, pid in zip(branch_ids, parent_ids):
+        for bid, pid in zip(branch_ids, parent_ids, strict=False):
             if pid == parent_id:
                 return bid
         return None
@@ -332,7 +285,7 @@ class Trilium:
         return None
 
     def find_session_note(self, day_id: str, session_id: str) -> str | None:
-        """Find an existing recap note for the given session under day_id."""
+        """Find an existing session note under day_id."""
         expr = f'note.parents.noteId="{day_id}" #sessionId="{session_id}"'
         for n in self.search(expr, limit="5"):
             if day_id not in (n.get("parentNoteIds") or []):
@@ -687,102 +640,85 @@ def cmd_note_merge_topic(args):
     }, ensure_ascii=False))
 
 
-def cmd_recap(args):
-    from jsonl_render import EmptyTranscriptError, render_jsonl
 
-    cfg = load_config()
-    t = Trilium(cfg)
 
-    jsonl_path, session_id = resolve_jsonl_path(
-        getattr(args, "session", None), getattr(args, "project_dir", None)
-    )
-    if not os.path.exists(jsonl_path):
-        die(f"找不到 session JSONL: {jsonl_path}")
-
-    try:
-        md = render_jsonl(jsonl_path)
-    except EmptyTranscriptError:
-        die(f"session JSONL 没有可渲染内容: {jsonl_path}")
-
-    date = parse_date(getattr(args, "date", None))
-    day_id = t.ensure_date_path(date)
-
-    suffix = getattr(args, "title_suffix", None)
-    title = f"Recap：{suffix}" if suffix else "Recap"
-
-    html = render_markdown(md)
-
-    existing = t.find_session_note(day_id, session_id)
-    if existing:
-        t.update_note_content(existing, html)
-        cur = t.get_note(existing)
-        if cur.get("title") != title:
-            t.update_note(existing, title=title)
-        nid = existing
-        action = "已更新"
-    else:
-        nid = t.create_note(day_id, title, html, ntype="text")["note"]["noteId"]
-        t.add_label(nid, "diary")
-        t.add_label(nid, "sessionId", session_id)
-        t.add_label(nid, "diaryDate", date.isoformat())
-        t.add_label(nid, "iconClass", RECAP_ICON)
-        action = "已创建"
-
-    print(f"✓ {action}: {title}")
-    print(f"  noteId: {nid}")
-    url = "{}/#root/{}".format(cfg["server"], nid)
-    print(f"  打开: {url}")
+def _add_note_write_args(p, *, needs_url=False):
+    p.add_argument("--topic", required=True)
+    p.add_argument("--title", required=True)
+    p.add_argument("--source-session", dest="source_session", required=True)
+    p.add_argument("--note-date", dest="note_date", required=True)
+    p.add_argument("--icon", default=None)
+    if needs_url:
+        p.add_argument("--url", required=True)
 
 
 def build_parser():
     p = argparse.ArgumentParser(
-        prog="trilium.py", description="把工作日记写入 Trilium 日历"
+        prog="trilium.py", description="通用 Trilium 知识笔记 CLI"
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {_get_version()}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("check", help="检查服务器、token、日历根")
+    sub.add_parser("check", help="检查服务器、token、两个 root、类型节点")
 
-    pl = sub.add_parser("list", help="列出日记条目")
-    pl.add_argument("--date", help="只列某天 YYYY-MM-DD")
-    pl.add_argument("--limit", type=int, default=50, help="最多条数，默认 50")
-    pl.add_argument(
-        "--format",
-        choices=["text", "json"],
-        default="text",
-        help="输出格式，默认 text",
-    )
+    # note 命名空间
+    p_note = sub.add_parser("note", help="知识笔记写入 / 主题治理")
+    note_sub = p_note.add_subparsers(dest="note_cmd", required=True)
 
-    pd = sub.add_parser("delete", help="删除一条日记条目")
-    pd.add_argument("note_id", help="要删除的笔记 ID")
+    p_til = note_sub.add_parser("til", help="写一条 TIL")
+    _add_note_write_args(p_til)
+    p_idea = note_sub.add_parser("idea", help="写一条想法")
+    _add_note_write_args(p_idea)
+    p_ref = note_sub.add_parser("ref", help="写一条参考资料")
+    _add_note_write_args(p_ref, needs_url=True)
 
-    pg = sub.add_parser("get", help="查看一条日记的详情")
-    pg.add_argument("note_id", help="笔记 ID")
-    pg.add_argument("--content", action="store_true", help="同时显示笔记内容")
+    note_sub.add_parser("topics", help="列所有主题")
 
-    pu = sub.add_parser("update", help="修改一条日记")
-    pu.add_argument("note_id", help="笔记 ID")
-    pu.add_argument("--title", help="新标题")
-    pu.add_argument("--icon", help="新图标 (iconClass 值)")
+    p_merge = note_sub.add_parser("merge-topic", help="同类型内归并主题")
+    p_merge.add_argument("--type", required=True, choices=["til", "idea", "ref"])
+    p_merge.add_argument("from_topic")
+    p_merge.add_argument("to_topic")
 
-    pr = sub.add_parser("recap", help="把当前 session JSONL 渲染并写入日历")
-    pr.add_argument("--title-suffix", help="标题后缀（Recap：<suffix>）")
-    pr.add_argument("--session", help="覆盖 sessionId，默认读 $CLAUDE_CODE_SESSION_ID")
-    pr.add_argument("--project-dir", help="覆盖项目目录，默认 $PWD")
-    pr.add_argument("--date", help="覆盖日期 YYYY-MM-DD，默认今天")
+    # 顶层通用 CRUD
+    p_list = sub.add_parser("list", help="列出知识笔记")
+    p_list.add_argument("--type", choices=["til", "idea", "ref"])
+    p_list.add_argument("--topic")
+    p_list.add_argument("--note-date", dest="note_date")
+    p_list.add_argument("--source-session", dest="source_session")
+    p_list.add_argument("--limit", type=int, default=50)
+
+    p_get = sub.add_parser("get", help="查看一条笔记")
+    p_get.add_argument("note_id")
+    p_get.add_argument("--content", action="store_true")
+
+    p_upd = sub.add_parser("update", help="修改标题/图标/正文")
+    p_upd.add_argument("note_id")
+    p_upd.add_argument("--title", default=None)
+    p_upd.add_argument("--icon", default=None)
+
+    p_del = sub.add_parser("delete", help="删除一条笔记")
+    p_del.add_argument("note_id")
 
     return p
 
 
 def main():
     args = build_parser().parse_args()
+    if args.cmd == "note":
+        {
+            "til": cmd_note_til,
+            "idea": cmd_note_idea,
+            "ref": cmd_note_ref,
+            "topics": cmd_note_topics,
+            "merge-topic": cmd_note_merge_topic,
+        }[args.note_cmd](args)
+        return
     {
         "check": cmd_check,
         "list": cmd_list,
-        "delete": cmd_delete,
         "get": cmd_get,
         "update": cmd_update,
-        "recap": cmd_recap,
+        "delete": cmd_delete,
     }[args.cmd](args)
 
 

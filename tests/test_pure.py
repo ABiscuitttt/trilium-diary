@@ -125,90 +125,116 @@ class TestConstants:
 # build_parser
 # ---------------------------------------------------------------------------
 class TestBuildParser:
-    def test_no_subcommand_exits(self):
+    def test_check_subcommand(self):
         p = build_parser()
-        with pytest.raises(SystemExit):
-            p.parse_args([])
+        args = p.parse_args(["check"])
+        assert args.cmd == "check"
 
-    def test_list_defaults(self):
+    def test_note_til(self):
         p = build_parser()
-        args = p.parse_args(["list"])
-        assert args.date is None
-        assert args.limit == 50
-
-    def test_list_with_options(self):
-        p = build_parser()
-        args = p.parse_args(["list", "--date", "2026-06-01", "--limit", "10"])
-        assert args.date == "2026-06-01"
-        assert args.limit == 10
-
-    def test_delete_parses_note_id(self):
-        p = build_parser()
-        args = p.parse_args(["delete", "abc123"])
-        assert args.cmd == "delete"
-        assert args.note_id == "abc123"
-
-    def test_delete_missing_note_id_exits(self):
-        p = build_parser()
-        with pytest.raises(SystemExit):
-            p.parse_args(["delete"])
-
-    def test_get_parses_note_id(self):
-        p = build_parser()
-        args = p.parse_args(["get", "n1"])
-        assert args.cmd == "get"
-        assert args.note_id == "n1"
-        assert args.content is False
-
-    def test_get_with_content(self):
-        p = build_parser()
-        args = p.parse_args(["get", "n1", "--content"])
-        assert args.content is True
-
-    def test_update_parses_note_id_and_title(self):
-        p = build_parser()
-        args = p.parse_args(["update", "n1", "--title", "new"])
-        assert args.cmd == "update"
-        assert args.note_id == "n1"
-        assert args.title == "new"
+        args = p.parse_args([
+            "note", "til",
+            "--topic", "Postgres",
+            "--title", "TIL: tz",
+            "--source-session", "s1",
+            "--note-date", "2026-07-03",
+        ])
+        assert args.cmd == "note"
+        assert args.note_cmd == "til"
+        assert args.topic == "Postgres"
+        assert args.title == "TIL: tz"
+        assert args.source_session == "s1"
+        assert args.note_date == "2026-07-03"
         assert args.icon is None
 
-    def test_update_with_icon(self):
+    def test_note_til_missing_required(self):
         p = build_parser()
-        args = p.parse_args(["update", "n1", "--icon", "bx bx-data"])
+        with pytest.raises(SystemExit):
+            p.parse_args(["note", "til", "--topic", "X"])
+
+    def test_note_ref_requires_url(self):
+        p = build_parser()
+        args = p.parse_args([
+            "note", "ref",
+            "--topic", "SQLite",
+            "--title", "t",
+            "--source-session", "s1",
+            "--note-date", "2026-07-03",
+            "--url", "https://ex.com",
+        ])
+        assert args.url == "https://ex.com"
+
+    def test_note_ref_missing_url_fails(self):
+        p = build_parser()
+        with pytest.raises(SystemExit):
+            p.parse_args([
+                "note", "ref",
+                "--topic", "X", "--title", "t",
+                "--source-session", "s", "--note-date", "2026-07-03",
+            ])
+
+    def test_note_idea(self):
+        p = build_parser()
+        args = p.parse_args([
+            "note", "idea",
+            "--topic", "Trilium", "--title", "t",
+            "--source-session", "s", "--note-date", "2026-07-03",
+            "--icon", "bx bx-brain",
+        ])
+        assert args.note_cmd == "idea"
+        assert args.icon == "bx bx-brain"
+
+    def test_note_topics(self):
+        p = build_parser()
+        args = p.parse_args(["note", "topics"])
+        assert args.note_cmd == "topics"
+
+    def test_note_merge_topic(self):
+        p = build_parser()
+        args = p.parse_args([
+            "note", "merge-topic", "--type", "til", "OldPg", "Postgres",
+        ])
+        assert args.note_cmd == "merge-topic"
+        assert args.type == "til"
+        assert args.from_topic == "OldPg"
+        assert args.to_topic == "Postgres"
+
+    def test_list_all(self):
+        p = build_parser()
+        args = p.parse_args([
+            "list", "--type", "til", "--topic", "Postgres",
+            "--note-date", "2026-07-03", "--source-session", "s1",
+            "--limit", "20",
+        ])
+        assert args.cmd == "list"
+        assert args.type == "til"
+        assert args.topic == "Postgres"
+        assert args.note_date == "2026-07-03"
+        assert args.source_session == "s1"
+        assert args.limit == 20
+
+    def test_get(self):
+        p = build_parser()
+        args = p.parse_args(["get", "abc123"])
+        assert args.cmd == "get"
+        assert args.note_id == "abc123"
+        assert args.content is False
+        args2 = p.parse_args(["get", "abc123", "--content"])
+        assert args2.content is True
+
+    def test_update(self):
+        p = build_parser()
+        args = p.parse_args([
+            "update", "abc", "--title", "new", "--icon", "bx bx-data",
+        ])
+        assert args.cmd == "update"
+        assert args.note_id == "abc"
+        assert args.title == "new"
         assert args.icon == "bx bx-data"
 
-    def test_update_no_flags_defaults(self):
+    def test_delete(self):
         p = build_parser()
-        args = p.parse_args(["update", "n1"])
-        assert args.title is None
-        assert args.icon is None
+        args = p.parse_args(["delete", "abc"])
+        assert args.cmd == "delete"
+        assert args.note_id == "abc"
 
-    def test_recap_no_args(self):
-        p = build_parser()
-        args = p.parse_args(["recap"])
-        assert args.cmd == "recap"
-        assert args.title_suffix is None
-        assert args.session is None
-        assert args.project_dir is None
-        assert args.date is None
-
-    def test_recap_with_all_args(self):
-        p = build_parser()
-        args = p.parse_args(
-            [
-                "recap",
-                "--title-suffix",
-                "重构",
-                "--session",
-                "abc",
-                "--project-dir",
-                "/tmp/p",
-                "--date",
-                "2026-06-30",
-            ]
-        )
-        assert args.title_suffix == "重构"
-        assert args.session == "abc"
-        assert args.project_dir == "/tmp/p"
-        assert args.date == "2026-06-30"

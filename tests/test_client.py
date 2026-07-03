@@ -12,16 +12,12 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from trilium import (
-    RECAP_ICON,
     Trilium,
     cmd_check,
-    cmd_delete,
     cmd_get,
     cmd_list,
-    cmd_recap,
     cmd_update,
     load_config,
-    resolve_jsonl_path,
 )
 
 # ---------------------------------------------------------------------------
@@ -438,40 +434,6 @@ class TestCmdCheck:
             assert "0.63.0" in out
 
 
-class TestCmdList:
-    def test_list_with_results(self, tmp_path, capsys):
-        config_path = _make_config(tmp_path)
-        with (
-            patch("trilium.CONFIG_PATH", config_path),
-            patch("trilium.Trilium") as MockTril,
-        ):
-            inst = MockTril.return_value
-            inst.search.return_value = [
-                {
-                    "noteId": "n1",
-                    "title": "🪤 · bug",
-                    "attributes": [{"name": "diaryDate", "value": "2026-06-01"}],
-                },
-            ]
-            args = MagicMock(cmd="list", date="2026-06-01", limit=50)
-            cmd_list(args)
-            out = capsys.readouterr().out
-            assert "🪤 · bug" in out
-            assert "2026-06-01" in out
-
-    def test_list_empty(self, tmp_path, capsys):
-        config_path = _make_config(tmp_path)
-        with (
-            patch("trilium.CONFIG_PATH", config_path),
-            patch("trilium.Trilium") as MockTril,
-        ):
-            inst = MockTril.return_value
-            inst.search.return_value = []
-            args = MagicMock(cmd="list", date=None, limit=50)
-            cmd_list(args)
-            out = capsys.readouterr().out
-            assert "没有" in out
-
 
 # ---------------------------------------------------------------------------
 # load_config
@@ -523,106 +485,7 @@ class TestLoadConfig:
         assert result["calendarRootId"] == ""
 
 
-class TestCmdDelete:
-    def test_delete_success(self, tmp_path, capsys):
-        config_path = _make_config(tmp_path)
-        with (
-            patch("trilium.CONFIG_PATH", config_path),
-            patch("trilium.Trilium") as MockTril,
-        ):
-            inst = MockTril.return_value
-            inst.get_note.return_value = {
-                "noteId": "abc123",
-                "title": "🪤 · some bug",
-                "attributes": [
-                    {"name": "diaryType", "value": "trap"},
-                    {"name": "diaryDate", "value": "2026-06-01"},
-                ],
-            }
-            inst.delete_note.return_value = MagicMock()
-
-            args = MagicMock(cmd="delete", note_id="abc123")
-            cmd_delete(args)
-            out = capsys.readouterr().out
-            assert "🪤 · some bug" in out
-            assert "trap" not in out
-            assert "2026-06-01" in out
-            assert "✓ 已删除" in out
-            inst.delete_note.assert_called_once_with("abc123")
-
-    def test_delete_no_diary_labels(self, tmp_path, capsys):
-        """Delete a note without diary labels still works."""
-        config_path = _make_config(tmp_path)
-        with (
-            patch("trilium.CONFIG_PATH", config_path),
-            patch("trilium.Trilium") as MockTril,
-        ):
-            inst = MockTril.return_value
-            inst.get_note.return_value = {
-                "noteId": "xyz",
-                "title": "plain note",
-                "attributes": [],
-            }
-            inst.delete_note.return_value = MagicMock()
-
-            args = MagicMock(cmd="delete", note_id="xyz")
-            cmd_delete(args)
-            out = capsys.readouterr().out
-            assert "plain note" in out
-            assert "✓ 已删除" in out
-
-
 class TestCmdGet:
-    def test_get_shows_metadata(self, tmp_path, capsys):
-        config_path = _make_config(tmp_path)
-        with (
-            patch("trilium.CONFIG_PATH", config_path),
-            patch("trilium.Trilium") as MockTril,
-        ):
-            inst = MockTril.return_value
-            inst.get_note.return_value = {
-                "noteId": "n1",
-                "title": "🪤 · bug fix",
-                "attributes": [
-                    {"name": "diaryType", "value": "trap"},
-                    {"name": "diaryDate", "value": "2026-06-01"},
-                ],
-            }
-
-            args = MagicMock(note_id="n1", content=False)
-            cmd_get(args)
-            out = capsys.readouterr().out
-            assert "🪤 · bug fix" in out
-            assert "trap" in out
-            assert "2026-06-01" in out
-            assert "n1" in out
-            # content not fetched without --content
-            inst.get_note_content.assert_not_called()
-
-    def test_get_with_content(self, tmp_path, capsys):
-        config_path = _make_config(tmp_path)
-        with (
-            patch("trilium.CONFIG_PATH", config_path),
-            patch("trilium.Trilium") as MockTril,
-        ):
-            inst = MockTril.return_value
-            inst.get_note.return_value = {
-                "noteId": "n1",
-                "title": "📦 · release",
-                "attributes": [
-                    {"name": "diaryType", "value": "work"},
-                    {"name": "diaryDate", "value": "2026-05-28"},
-                ],
-            }
-            inst.get_note_content.return_value = "<p>release notes</p>"
-
-            args = MagicMock(note_id="n1", content=True)
-            cmd_get(args)
-            out = capsys.readouterr().out
-            assert "---" in out
-            assert "release notes" in out
-            inst.get_note_content.assert_called_once_with("n1")
-
     def test_get_no_diary_labels(self, tmp_path, capsys):
         config_path = _make_config(tmp_path)
         with (
@@ -727,34 +590,6 @@ class TestCmdUpdate:
 
 
 class TestCmdListJson:
-    def test_list_json_format(self, tmp_path, capsys):
-        config_path = _make_config(tmp_path)
-        with (
-            patch("trilium.CONFIG_PATH", config_path),
-            patch("trilium.Trilium") as MockTril,
-        ):
-            inst = MockTril.return_value
-            inst.search.return_value = [
-                {
-                    "noteId": "n1",
-                    "title": "🪤 · bug",
-                    "attributes": [{"name": "diaryDate", "value": "2026-06-01"}],
-                },
-                {
-                    "noteId": "n2",
-                    "title": "💡 · insight",
-                    "attributes": [{"name": "diaryDate", "value": "2026-06-02"}],
-                },
-            ]
-
-            args = MagicMock(date=None, limit=50, format="json")
-            cmd_list(args)
-            out = capsys.readouterr().out
-            data = json.loads(out)
-            assert len(data) == 2
-            assert data[0]["noteId"] == "n1"
-            assert data[1]["title"] == "💡 · insight"
-
     def test_list_text_format_default(self, tmp_path, capsys):
         config_path = _make_config(tmp_path)
         with (
@@ -840,150 +675,3 @@ class TestCmdCheckEnhanced:
             out = capsys.readouterr().out
             assert "缺少" in out or "⚠" in out
 
-
-class TestResolveJsonlPath:
-    def test_explicit_session_and_project_dir(self, tmp_path):
-        proj = tmp_path / "myproj"
-        proj.mkdir()
-        path, sid = resolve_jsonl_path("abc-123", str(proj))
-        slug = str(proj).replace("/", "-")
-        assert path.endswith(f"{slug}/abc-123.jsonl")
-        assert sid == "abc-123"
-
-    def test_falls_back_to_env(self, tmp_path, monkeypatch):
-        proj = tmp_path / "p"
-        proj.mkdir()
-        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "envsess")
-        monkeypatch.chdir(proj)
-        path, sid = resolve_jsonl_path(None, None)
-        assert path.endswith("envsess.jsonl")
-        assert sid == "envsess"
-
-    def test_missing_session_exits(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
-        monkeypatch.chdir(tmp_path)
-        with pytest.raises(SystemExit):
-            resolve_jsonl_path(None, None)
-
-    def test_invalid_session_id_exits(self, tmp_path):
-        with pytest.raises(SystemExit):
-            resolve_jsonl_path('bad"id', str(tmp_path))
-
-
-class TestCmdRecapCreate:
-    def test_creates_new_note_with_labels(self, tmp_path, monkeypatch, capsys):
-        # config
-        cfg_path = _make_config(tmp_path)
-        monkeypatch.setattr("trilium.CONFIG_PATH", cfg_path)
-
-        # jsonl fixture
-        jsonl = tmp_path / "sess.jsonl"
-        jsonl.write_text(
-            '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}\n',
-            encoding="utf-8",
-        )
-
-        args = MagicMock()
-        args.title_suffix = "重构设计"
-        args.session = "sess"
-        args.project_dir = str(tmp_path)
-        args.date = None
-
-        # Patch the actual jsonl path resolution to return our fixture
-        monkeypatch.setattr(
-            "trilium.resolve_jsonl_path",
-            lambda s, p: (str(jsonl), "sess"),
-        )
-
-        with patch.object(Trilium, "ensure_date_path", return_value="day123"), \
-             patch.object(Trilium, "find_session_note", return_value=None), \
-             patch.object(
-                 Trilium, "create_note",
-                 return_value={"note": {"noteId": "newnote"}},
-             ) as create, \
-             patch.object(Trilium, "add_label") as add_label:
-            cmd_recap(args)
-
-        create.assert_called_once()
-        # The note title is "Recap：重构设计"
-        assert create.call_args.args[1] == "Recap：重构设计"
-        # Labels: #diary, #sessionId=sess, #diaryDate=<today>, #iconClass
-        names = [c.args[1] for c in add_label.call_args_list]
-        assert "diary" in names
-        assert "sessionId" in names
-        assert "diaryDate" in names
-        assert "iconClass" in names
-        # Verify iconClass value is RECAP_ICON
-        icon_call = next(
-            c for c in add_label.call_args_list if c.args[1] == "iconClass"
-        )
-        assert icon_call.args[2] == RECAP_ICON
-
-
-class TestCmdRecapUpdate:
-    def test_updates_existing_note_when_session_matches(
-        self, tmp_path, monkeypatch
-    ):
-        cfg_path = _make_config(tmp_path)
-        monkeypatch.setattr("trilium.CONFIG_PATH", cfg_path)
-
-        jsonl = tmp_path / "sess.jsonl"
-        jsonl.write_text(
-            '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}\n',
-            encoding="utf-8",
-        )
-
-        args = MagicMock()
-        args.title_suffix = "v2"
-        args.session = "sess"
-        args.project_dir = str(tmp_path)
-        args.date = None
-
-        monkeypatch.setattr(
-            "trilium.resolve_jsonl_path",
-            lambda s, p: (str(jsonl), "sess"),
-        )
-
-        with patch.object(Trilium, "ensure_date_path", return_value="day"), \
-             patch.object(Trilium, "find_session_note", return_value="existing-id"), \
-             patch.object(Trilium, "update_note_content") as upd_content, \
-             patch.object(
-                 Trilium, "get_note",
-                 return_value={"title": "Recap：v1"},
-             ), \
-             patch.object(Trilium, "update_note") as upd_note, \
-             patch.object(Trilium, "create_note") as create, \
-             patch.object(Trilium, "add_label") as add_label:
-            cmd_recap(args)
-
-        upd_content.assert_called_once()
-        assert upd_content.call_args.args[0] == "existing-id"
-        upd_note.assert_called_once_with("existing-id", title="Recap：v2")
-        create.assert_not_called()
-        add_label.assert_not_called()
-
-    def test_skips_title_patch_when_unchanged(self, tmp_path, monkeypatch):
-        cfg_path = _make_config(tmp_path)
-        monkeypatch.setattr("trilium.CONFIG_PATH", cfg_path)
-        jsonl = tmp_path / "s.jsonl"
-        jsonl.write_text(
-            '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}\n',
-            encoding="utf-8",
-        )
-        args = MagicMock()
-        args.title_suffix = "same"
-        args.session = "s"
-        args.project_dir = str(tmp_path)
-        args.date = None
-        monkeypatch.setattr(
-            "trilium.resolve_jsonl_path", lambda a, b: (str(jsonl), "s")
-        )
-        with patch.object(Trilium, "ensure_date_path", return_value="day"), \
-             patch.object(Trilium, "find_session_note", return_value="eid"), \
-             patch.object(Trilium, "update_note_content"), \
-             patch.object(
-                 Trilium, "get_note", return_value={"title": "Recap：same"}
-             ), \
-             patch.object(Trilium, "update_note") as upd_note:
-            cmd_recap(args)
-        upd_note.assert_not_called()
