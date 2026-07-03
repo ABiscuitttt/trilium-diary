@@ -128,6 +128,7 @@ def load_config():
     cfg["server"] = cfg["server"].rstrip("/")
     # calendarRootId optional: auto-detected via #calendarRoot if absent.
     cfg.setdefault("calendarRootId", "")
+    cfg.setdefault("knowledgeRootId", "")
     return cfg
 
 
@@ -220,6 +221,25 @@ class Trilium:
             die(
                 f"发现多个 #calendarRoot：{ids}\n"
                 "请在 etc/config.json 用 calendarRootId 指定。"
+            )
+        return hits[0]["noteId"]
+
+    def knowledge_root(self):
+        """Resolve the knowledge root note id (config override or #knowledgeRoot)."""
+        if self.cfg.get("knowledgeRootId"):
+            return self.cfg["knowledgeRootId"]
+        hits = self.search("#knowledgeRoot", limit="5")
+        if not hits:
+            die(
+                "找不到知识根（带 #knowledgeRoot 的笔记）。"
+                "请在 etc/config.json 设置 knowledgeRootId，"
+                "或在 Trilium 里建一条笔记打 #knowledgeRoot 标签。"
+            )
+        if len(hits) > 1:
+            ids = ", ".join("{}({})".format(h["noteId"], h["title"]) for h in hits)
+            die(
+                f"发现多个 #knowledgeRoot：{ids}\n"
+                "请在 etc/config.json 用 knowledgeRootId 指定。"
             )
         return hits[0]["noteId"]
 

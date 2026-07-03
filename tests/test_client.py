@@ -94,6 +94,49 @@ class TestTriliumClient:
         ):
             t.calendar_root()
 
+    def test_knowledge_root_from_config(self):
+        t = self._client(
+            {"server": "http://x", "token": "t", "calendarRootId": "c",
+             "knowledgeRootId": "k1"}
+        )
+        assert t.knowledge_root() == "k1"
+
+    def test_knowledge_root_auto_detect_single(self):
+        t = self._client(
+            {"server": "http://x", "token": "t", "calendarRootId": "c",
+             "knowledgeRootId": ""}
+        )
+        with patch.object(
+            t, "search", return_value=[{"noteId": "kn1", "title": "Knowledge"}]
+        ):
+            assert t.knowledge_root() == "kn1"
+
+    def test_knowledge_root_auto_detect_none_exits(self):
+        t = self._client(
+            {"server": "http://x", "token": "t", "calendarRootId": "c",
+             "knowledgeRootId": ""}
+        )
+        with patch.object(t, "search", return_value=[]), pytest.raises(SystemExit):
+            t.knowledge_root()
+
+    def test_knowledge_root_auto_detect_multiple_exits(self):
+        t = self._client(
+            {"server": "http://x", "token": "t", "calendarRootId": "c",
+             "knowledgeRootId": ""}
+        )
+        with (
+            patch.object(
+                t,
+                "search",
+                return_value=[
+                    {"noteId": "a", "title": "K1"},
+                    {"noteId": "b", "title": "K2"},
+                ],
+            ),
+            pytest.raises(SystemExit),
+        ):
+            t.knowledge_root()
+
     def test_ensure_year_existing(self):
         t = self._client()
         with patch.object(t, "_child_with_label", return_value="y2026"):
