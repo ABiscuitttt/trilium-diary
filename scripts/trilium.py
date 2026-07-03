@@ -456,20 +456,10 @@ def cmd_list(args):
 def cmd_delete(args):
     cfg = load_config()
     t = Trilium(cfg)
-    note = t.get_note(args.note_id)
-    # Show what will be deleted
-    diary_date = next(
-        (a["value"] for a in note.get("attributes", []) if a["name"] == "diaryDate"),
-        "",
-    )
-    title = note.get("title", "")
-    info_parts = [f"  标题: {title}"]
-    if diary_date:
-        info_parts.append(f"  日期: {diary_date}")
-    print("即将删除：")
-    print("\n".join(info_parts))
     t.delete_note(args.note_id)
-    print(f"✓ 已删除: {title}")
+    print(json.dumps(
+        {"noteId": args.note_id, "ok": True}, ensure_ascii=False
+    ))
 
 
 def cmd_get(args):

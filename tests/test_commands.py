@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from trilium import (
     TYPE_DEFAULT_ICONS,
+    cmd_delete,
     cmd_get,
     cmd_list,
     cmd_note_idea,
@@ -418,3 +419,15 @@ class TestUpdate:
         t.get_note.assert_not_called()
         t.patch_attribute.assert_not_called()
         t.add_label.assert_not_called()
+
+
+class TestDelete:
+    def test_delete_emits_json(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            args = Namespace(note_id="n1")
+            cmd_delete(args)
+        t.delete_note.assert_called_once_with("n1")
+        out = json.loads(capsys.readouterr().out)
+        assert out == {"noteId": "n1", "ok": True}
