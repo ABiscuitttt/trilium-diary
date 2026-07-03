@@ -284,20 +284,6 @@ class Trilium:
                 return n["noteId"]
         return None
 
-    def find_session_note(self, day_id: str, session_id: str) -> str | None:
-        """Find an existing session note under day_id."""
-        expr = f'note.parents.noteId="{day_id}" #sessionId="{session_id}"'
-        for n in self.search(expr, limit="5"):
-            if day_id not in (n.get("parentNoteIds") or []):
-                continue
-            attrs = n.get("attributes", []) or []
-            if any(
-                a["name"] == "sessionId" and a["value"] == session_id
-                for a in attrs
-            ):
-                return n["noteId"]
-        return None
-
     def ensure_year(self, root_id, date):
         val = f"{date.year:04d}"
         found = self._child_with_label(root_id, "yearNote", val)
@@ -357,17 +343,6 @@ def parse_date(s):
         return _dt.datetime.strptime(s, "%Y-%m-%d").date()
     except ValueError:
         die(f"日期格式应为 YYYY-MM-DD，收到: {s}")
-
-
-def _get_attr(note, name):
-    """Return the first attribute dict matching name, or None."""
-    return next((a for a in note.get("attributes", []) if a["name"] == name), None)
-
-
-def _get_attr_value(note, name, default=""):
-    """Return the value of the first attribute matching name."""
-    attr = _get_attr(note, name)
-    return attr["value"] if attr else default
 
 
 # ---- commands ---------------------------------------------------------------
