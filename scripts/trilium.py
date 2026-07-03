@@ -421,39 +421,36 @@ def cmd_check(args):
 def cmd_list(args):
     cfg = load_config()
     t = Trilium(cfg)
-    if args.date:
-        date = parse_date(args.date)
-        expr = f'#diary #diaryDate="{date.isoformat()}"'
-    else:
-        expr = "#diary"
+
+    parts = ["#knowledge"]
+    if args.type:
+        parts.append(f'#type="{args.type}"')
+    if args.topic:
+        parts.append(f'#topic="{args.topic}"')
+    if args.note_date:
+        parts.append(f'#noteDate="{args.note_date}"')
+    if args.source_session:
+        parts.append(f'#sourceSession="{args.source_session}"')
+    expr = " ".join(parts)
+
     rows = t.search(
-        expr, orderBy="dateCreated", orderDirection="desc", limit=str(args.limit)
+        expr,
+        orderBy="dateCreated",
+        orderDirection="desc",
+        limit=str(args.limit),
     )
-    if not rows:
-        print("(没有匹配的日记条目)")
-        return
-    if getattr(args, "format", "text") == "json":
-        items = []
-        for n in rows:
-            sd = next(
-                (
-                    a["value"]
-                    for a in n.get("attributes", [])
-                    if a["name"] == "diaryDate"
-                ),
-                "",
-            )
-            items.append(
-                {"noteId": n.get("noteId"), "title": n.get("title"), "date": sd}
-            )
-        print(json.dumps(items, ensure_ascii=False, indent=2))
-        return
+    items = []
     for n in rows:
-        sd = next(
-            (a["value"] for a in n.get("attributes", []) if a["name"] == "diaryDate"),
-            "",
-        )
-        print(f"{n.get('noteId')}  {sd:<12} {n.get('title')}")
+        attrs = {a["name"]: a["value"] for a in n.get("attributes", [])}
+        items.append({
+            "noteId": n.get("noteId"),
+            "title": n.get("title"),
+            "type": attrs.get("type", ""),
+            "topic": attrs.get("topic", ""),
+            "noteDate": attrs.get("noteDate", ""),
+            "sourceSession": attrs.get("sourceSession", ""),
+        })
+    print(json.dumps({"items": items}, ensure_ascii=False))
 
 
 def cmd_delete(args):

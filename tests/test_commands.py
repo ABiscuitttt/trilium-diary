@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from trilium import (
     TYPE_DEFAULT_ICONS,
+    cmd_list,
     cmd_note_idea,
     cmd_note_ref,
     cmd_note_til,
@@ -196,3 +197,85 @@ class TestCloneFallback:
         assert out["cloned"] is False
         assert out["cloneError"] == "http 500"
         assert "clone 到日历失败" in cap.err
+
+
+class TestList:
+    def _make_hits(self):
+        return [
+            {
+                "noteId": "n1",
+                "title": "TIL: pg tz",
+                "attributes": [
+                    {"name": "type", "value": "til"},
+                    {"name": "topic", "value": "Postgres"},
+                    {"name": "noteDate", "value": "2026-07-03"},
+                    {"name": "sourceSession", "value": "sess-1"},
+                ],
+            },
+            {
+                "noteId": "n2",
+                "title": "Idea: workspaces",
+                "attributes": [
+                    {"name": "type", "value": "idea"},
+                    {"name": "topic", "value": "Trilium"},
+                    {"name": "noteDate", "value": "2026-07-03"},
+                    {"name": "sourceSession", "value": "sess-1"},
+                ],
+            },
+        ]
+
+    def test_list_default_uses_knowledge_tag(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.search.return_value = self._make_hits()
+            args = Namespace(
+                type=None, topic=None, note_date=None,
+                source_session=None, limit=50,
+            )
+            cmd_list(args)
+        expr = t.search.call_args.args[0]
+        assert "#knowledge" in expr
+        out = json.loads(capsys.readouterr().out)
+        assert len(out["items"]) == 2
+        first = out["items"][0]
+        assert first["noteId"] == "n1"
+        assert first["type"] == "til"
+        assert first["topic"] == "Postgres"
+        assert first["noteDate"] == "2026-07-03"
+        assert first["sourceSession"] == "sess-1"
+
+    def test_list_filters_compose(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.search.return_value = []
+            args = Namespace(
+                type="til", topic="Postgres", note_date="2026-07-03",
+                source_session="sess-1", limit=10,
+            )
+            cmd_list(args)
+        expr = t.search.call_args.args[0]
+        assert "#knowledge" in expr
+        assert '#type="til"' in expr
+        assert '#topic="Postgres"' in expr
+        assert '#noteDate="2026-07-03"' in expr
+        assert '#sourceSession="sess-1"' in expr
+        assert t.search.call_args.kwargs["limit"] == "10"
+
+    def test_list_empty_returns_empty_items(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.search.return_value = []
+            args = Namespace(
+                type=None, topic=None, note_date=None,
+                source_session=None, limit=50,
+            )
+            cmd_list(args)
+        out = json.loads(capsys.readouterr().out)
+        assert out == {"items": []}
