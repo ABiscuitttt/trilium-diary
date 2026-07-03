@@ -526,6 +526,69 @@ def cmd_update(args):
     print(f"  打开: {url}")
 
 
+def _note_url(cfg, note_id: str) -> str:
+    return "{}/#root/{}".format(cfg["server"], note_id)
+
+
+def _read_stdin_markdown() -> str:
+    md = sys.stdin.read()
+    if not md or not md.strip():
+        die("正文为空，请从 stdin 传入 markdown")
+    return md
+
+
+def _cmd_note_write(args, type_key: str) -> None:
+    cfg = load_config()
+    t = Trilium(cfg)
+
+    md = _read_stdin_markdown()
+    html = render_markdown(md)
+
+    topic_id = t.ensure_topic_path(type_key, args.topic)
+    nid = t.create_note(topic_id, args.title, html, ntype="text")["note"]["noteId"]
+
+    icon = args.icon if args.icon else TYPE_DEFAULT_ICONS[type_key]
+    t.add_label(nid, "knowledge", "")
+    t.add_label(nid, "type", type_key)
+    t.add_label(nid, "topic", args.topic)
+    t.add_label(nid, "sourceSession", args.source_session)
+    t.add_label(nid, "noteDate", args.note_date)
+    t.add_label(nid, "iconClass", icon)
+    if type_key == "ref":
+        t.add_label(nid, "url", args.url)
+
+    date = parse_date(args.note_date)
+    day_id = t.ensure_date_path(date)
+    clone = t.clone_note(nid, day_id)
+
+    out: dict = {
+        "noteId": nid,
+        "url": _note_url(cfg, nid),
+        "cloned": clone["cloned"],
+    }
+    if not clone["cloned"] and clone.get("error"):
+        out["cloneError"] = clone["error"]
+        print(
+            "clone 到日历失败：{}".format(clone["error"]),
+            file=sys.stderr,
+        )
+    print(json.dumps(out, ensure_ascii=False))
+
+
+def cmd_note_til(args) -> None:
+    _cmd_note_write(args, "til")
+
+
+def cmd_note_idea(args) -> None:
+    _cmd_note_write(args, "idea")
+
+
+def cmd_note_ref(args) -> None:
+    if not getattr(args, "url", None):
+        die("note ref 必须提供 --url")
+    _cmd_note_write(args, "ref")
+
+
 def cmd_recap(args):
     from jsonl_render import EmptyTranscriptError, render_jsonl
 
