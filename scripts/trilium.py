@@ -625,7 +625,7 @@ def cmd_note_merge_topic(args):
     t = Trilium(cfg)
 
     if args.type not in TYPE_DISPLAY_NAMES:
-        die(f"未知的知识笔记类型: {args.type!r}")
+        die(f"未知的知识笔记类型: {args.type!r}（应为 til/idea/ref）")
     if args.from_topic == args.to_topic:
         die("源主题与目标主题相同")
 
