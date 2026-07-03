@@ -291,6 +291,42 @@ class TestTriliumClient:
             t.delete_attribute("a1")
             t._req.assert_called_with("DELETE", "/attributes/a1")
 
+    def test_ensure_type_path_existing(self):
+        t = self._client()
+        with (
+            patch.object(t, "knowledge_root", return_value="kroot"),
+            patch.object(t, "_child_with_label", return_value="tilNode"),
+        ):
+            assert t.ensure_type_path("til") == "tilNode"
+
+    def test_ensure_type_path_creates_with_defaults(self):
+        from trilium import TYPE_DEFAULT_ICONS, TYPE_DISPLAY_NAMES
+
+        t = self._client()
+        with (
+            patch.object(t, "knowledge_root", return_value="kroot"),
+            patch.object(t, "_child_with_label", return_value=None),
+            patch.object(
+                t, "create_note", return_value={"note": {"noteId": "newTil"}}
+            ) as create_call,
+            patch.object(t, "add_label") as add_call,
+        ):
+            assert t.ensure_type_path("til") == "newTil"
+
+        create_call.assert_called_once_with("kroot", TYPE_DISPLAY_NAMES["til"], "")
+        label_names = [c.args[1] for c in add_call.call_args_list]
+        assert "typeNote" in label_names
+        assert "iconClass" in label_names
+        icon_call = next(c for c in add_call.call_args_list if c.args[1] == "iconClass")
+        assert icon_call.args[2] == TYPE_DEFAULT_ICONS["til"]
+        type_call = next(c for c in add_call.call_args_list if c.args[1] == "typeNote")
+        assert type_call.args[2] == "til"
+
+    def test_ensure_type_path_rejects_unknown_type(self):
+        t = self._client()
+        with pytest.raises(SystemExit):
+            t.ensure_type_path("bogus")
+
 
 # ---------------------------------------------------------------------------
 # Command-level integration tests (mocked Trilium + config)

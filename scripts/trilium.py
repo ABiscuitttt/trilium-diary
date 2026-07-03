@@ -90,6 +90,13 @@ def _get_version():
         return "unknown"
 
 RECAP_ICON = "bx bx-conversation"
+TYPE_DISPLAY_NAMES = {"til": "TIL", "idea": "Ideas", "ref": "References"}
+TYPE_DEFAULT_ICONS = {
+    "til": "bx bx-bulb",
+    "idea": "bx bx-brain",
+    "ref": "bx bx-book-bookmark",
+}
+TOPIC_FOLDER_ICON = "bx bx-folder"
 
 WEEKDAY_ZH = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 MONTH_EN = [
@@ -242,6 +249,20 @@ class Trilium:
                 "请在 etc/config.json 用 knowledgeRootId 指定。"
             )
         return hits[0]["noteId"]
+
+    def ensure_type_path(self, type_key: str) -> str:
+        """Find-or-create `Knowledge/<Type>/`; return its noteId."""
+        if type_key not in TYPE_DISPLAY_NAMES:
+            die(f"未知的知识笔记类型: {type_key!r}（应为 til/idea/ref）")
+        root_id = self.knowledge_root()
+        found = self._child_with_label(root_id, "typeNote", type_key)
+        if found:
+            return found
+        title = TYPE_DISPLAY_NAMES[type_key]
+        nid = self.create_note(root_id, title, "")["note"]["noteId"]
+        self.add_label(nid, "typeNote", type_key)
+        self.add_label(nid, "iconClass", TYPE_DEFAULT_ICONS[type_key])
+        return nid
 
     def _child_with_label(self, parent_id, label, value):
         """Find a direct child of parent_id carrying #label=value (calendar key)."""
