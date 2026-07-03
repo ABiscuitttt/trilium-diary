@@ -18,6 +18,7 @@ from trilium import (
     cmd_note_idea,
     cmd_note_ref,
     cmd_note_til,
+    cmd_update,
 )
 
 
@@ -329,3 +330,76 @@ class TestGet:
             cmd_get(args)
         out = json.loads(capsys.readouterr().out)
         assert out["content"] == "<p>body</p>"
+
+
+class TestUpdate:
+    def _note_with_icon(self):
+        return {
+            "noteId": "n1",
+            "title": "old title",
+            "attributes": [
+                {"attributeId": "attrIcon", "name": "iconClass", "value": "bx bx-x"},
+            ],
+        }
+
+    def _note_without_icon(self):
+        return {"noteId": "n1", "title": "old", "attributes": []}
+
+    def test_update_title_only(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        fake = io.StringIO("")
+        fake.isatty = lambda: True
+        monkeypatch.setattr("sys.stdin", fake)
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.get_note.return_value = self._note_without_icon()
+            args = Namespace(note_id="n1", title="new title", icon=None)
+            cmd_update(args)
+        t.update_note.assert_called_once_with("n1", title="new title")
+        t.update_note_content.assert_not_called()
+        out = json.loads(capsys.readouterr().out)
+        assert out == {"noteId": "n1", "ok": True}
+
+    def test_update_content_from_stdin(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        fake = io.StringIO("## new body")
+        fake.isatty = lambda: False
+        monkeypatch.setattr("sys.stdin", fake)
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.get_note.return_value = self._note_without_icon()
+            args = Namespace(note_id="n1", title=None, icon=None)
+            cmd_update(args)
+        t.update_note_content.assert_called_once()
+        html_arg = t.update_note_content.call_args.args[1]
+        assert "<h2>new body" in html_arg
+
+    def test_update_icon_patches_existing_attr(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        fake = io.StringIO("")
+        fake.isatty = lambda: True
+        monkeypatch.setattr("sys.stdin", fake)
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.get_note.return_value = self._note_with_icon()
+            args = Namespace(note_id="n1", title=None, icon="bx bx-data")
+            cmd_update(args)
+        t.patch_attribute.assert_called_once_with("attrIcon", value="bx bx-data")
+        t.add_label.assert_not_called()
+
+    def test_update_icon_adds_label_when_missing(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        fake = io.StringIO("")
+        fake.isatty = lambda: True
+        monkeypatch.setattr("sys.stdin", fake)
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.get_note.return_value = self._note_without_icon()
+            args = Namespace(note_id="n1", title=None, icon="bx bx-cog")
+            cmd_update(args)
+        t.add_label.assert_called_once_with("n1", "iconClass", "bx bx-cog")
+        t.patch_attribute.assert_not_called()

@@ -499,24 +499,26 @@ def cmd_update(args):
     if args.title is not None:
         t.update_note(args.note_id, title=args.title)
 
-    if args.content_file:
-        with open(args.content_file, encoding="utf-8") as f:
-            md = f.read()
-        if not md.strip():
-            die("内容为空")
-        html = render_markdown(md)
-        t.update_note_content(args.note_id, html)
-    elif not sys.stdin.isatty():
+    if not sys.stdin.isatty():
         md = sys.stdin.read()
         if md.strip():
             html = render_markdown(md)
             t.update_note_content(args.note_id, html)
 
-    updated = t.get_note(args.note_id)
-    print(f"✓ 已更新: {updated.get('title', '')}")
-    print(f"  noteId: {args.note_id}")
-    url = "{}/#root/{}".format(cfg["server"], args.note_id)
-    print(f"  打开: {url}")
+    if args.icon is not None:
+        note = t.get_note(args.note_id)
+        existing = next(
+            (a for a in note.get("attributes", []) if a["name"] == "iconClass"),
+            None,
+        )
+        if existing:
+            t.patch_attribute(existing["attributeId"], value=args.icon)
+        else:
+            t.add_label(args.note_id, "iconClass", args.icon)
+
+    print(json.dumps(
+        {"noteId": args.note_id, "ok": True}, ensure_ascii=False
+    ))
 
 
 def _note_url(cfg, note_id: str) -> str:
@@ -658,7 +660,7 @@ def build_parser():
     pu = sub.add_parser("update", help="修改一条日记")
     pu.add_argument("note_id", help="笔记 ID")
     pu.add_argument("--title", help="新标题")
-    pu.add_argument("--content-file", help="新内容的 markdown 文件路径")
+    pu.add_argument("--icon", help="新图标 (iconClass 值)")
 
     pr = sub.add_parser("recap", help="把当前 session JSONL 渲染并写入日历")
     pr.add_argument("--title-suffix", help="标题后缀（Recap：<suffix>）")

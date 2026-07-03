@@ -171,18 +171,18 @@ class TestBuildParser:
         assert args.cmd == "update"
         assert args.note_id == "n1"
         assert args.title == "new"
-        assert args.content_file is None
+        assert args.icon is None
 
-    def test_update_with_content_file(self):
+    def test_update_with_icon(self):
         p = build_parser()
-        args = p.parse_args(["update", "n1", "--content-file", "/tmp/n.md"])
-        assert args.content_file == "/tmp/n.md"
+        args = p.parse_args(["update", "n1", "--icon", "bx bx-data"])
+        assert args.icon == "bx bx-data"
 
     def test_update_no_flags_defaults(self):
         p = build_parser()
         args = p.parse_args(["update", "n1"])
         assert args.title is None
-        assert args.content_file is None
+        assert args.icon is None
 
     def test_recap_no_args(self):
         p = build_parser()

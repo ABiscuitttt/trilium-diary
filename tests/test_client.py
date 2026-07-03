@@ -1,6 +1,7 @@
 """Tests for Trilium client with mocked HTTP, and command-level integration tests."""
 
 import datetime as _dt
+import io
 import json
 import os
 import sys
@@ -638,29 +639,30 @@ class TestCmdUpdate:
         with (
             patch("trilium.CONFIG_PATH", config_path),
             patch("trilium.Trilium") as MockTril,
-            patch("sys.stdin.isatty", return_value=True),
         ):
             inst = MockTril.return_value
+            fake = io.StringIO("")
+            fake.isatty = lambda: True
             inst.get_note.return_value = {
                 "noteId": "n1",
                 "title": "old bug",
-                "attributes": [
-                    {"name": "diaryType", "value": "trap", "attributeId": "at1"},
-                    {"name": "diaryDate", "value": "2026-06-01"},
-                ],
+                "attributes": [],
             }
-
-            args = MagicMock(note_id="n1", title="new bug", content_file=None)
-            cmd_update(args)
+            import sys
+            orig = sys.stdin
+            sys.stdin = fake
+            try:
+                args = MagicMock(note_id="n1", title="new bug", icon=None)
+                cmd_update(args)
+            finally:
+                sys.stdin = orig
             out = capsys.readouterr().out
-            assert "✓ 已更新" in out
+            data = json.loads(out)
+            assert data == {"noteId": "n1", "ok": True}
             inst.update_note.assert_called_with("n1", title="new bug")
 
-    def test_update_content(self, tmp_path, capsys):
+    def test_update_content_from_stdin(self, tmp_path, capsys):
         config_path = _make_config(tmp_path)
-        content_file = tmp_path / "new.md"
-        content_file.write_text("## Updated\nnew content", encoding="utf-8")
-
         with (
             patch("trilium.CONFIG_PATH", config_path),
             patch("trilium.Trilium") as MockTril,
@@ -671,48 +673,26 @@ class TestCmdUpdate:
                 "title": "bug",
                 "attributes": [],
             }
-
-            args = MagicMock(
-                note_id="n1",
-                title=None,
-                content_file=str(content_file),
-            )
-            cmd_update(args)
+            fake = io.StringIO("## Updated\nnew content")
+            fake.isatty = lambda: False
+            import sys
+            orig = sys.stdin
+            sys.stdin = fake
+            try:
+                args = MagicMock(note_id="n1", title=None, icon=None)
+                cmd_update(args)
+            finally:
+                sys.stdin = orig
             inst.update_note_content.assert_called_once()
             call_content = inst.update_note_content.call_args[0][1]
             assert "Updated" in call_content
 
-    def test_update_content_empty_exits(self, tmp_path):
-        config_path = _make_config(tmp_path)
-        content_file = tmp_path / "empty.md"
-        content_file.write_text("   ", encoding="utf-8")
-
-        with (
-            patch("trilium.CONFIG_PATH", config_path),
-            patch("trilium.Trilium") as MockTril,
-        ):
-            inst = MockTril.return_value
-            inst.get_note.return_value = {
-                "noteId": "n1",
-                "title": "t",
-                "attributes": [],
-            }
-
-            args = MagicMock(
-                note_id="n1",
-                title=None,
-                content_file=str(content_file),
-            )
-            with pytest.raises(SystemExit):
-                cmd_update(args)
-
     def test_update_nothing(self, tmp_path, capsys):
-        """update with no flags still shows the note info."""
+        """update with no flags emits JSON ok."""
         config_path = _make_config(tmp_path)
         with (
             patch("trilium.CONFIG_PATH", config_path),
             patch("trilium.Trilium") as MockTril,
-            patch("sys.stdin.isatty", return_value=True),
         ):
             inst = MockTril.return_value
             inst.get_note.return_value = {
@@ -720,34 +700,20 @@ class TestCmdUpdate:
                 "title": "bug",
                 "attributes": [],
             }
-
-            args = MagicMock(note_id="n1", title=None, content_file=None)
-            cmd_update(args)
+            fake = io.StringIO("")
+            fake.isatty = lambda: True
+            import sys
+            orig = sys.stdin
+            sys.stdin = fake
+            try:
+                args = MagicMock(note_id="n1", title=None, icon=None)
+                cmd_update(args)
+            finally:
+                sys.stdin = orig
             out = capsys.readouterr().out
-            assert "✓ 已更新" in out
+            data = json.loads(out)
+            assert data == {"noteId": "n1", "ok": True}
             inst.update_note.assert_not_called()
-
-    def test_update_stdin_content(self, tmp_path, capsys):
-        """update reads content from stdin when no content-file and stdin is piped."""
-        config_path = _make_config(tmp_path)
-        with (
-            patch("trilium.CONFIG_PATH", config_path),
-            patch("trilium.Trilium") as MockTril,
-            patch("sys.stdin.isatty", return_value=False),
-            patch("sys.stdin.read", return_value="## Updated via stdin"),
-        ):
-            inst = MockTril.return_value
-            inst.get_note.return_value = {
-                "noteId": "n1",
-                "title": "test",
-                "attributes": [],
-            }
-
-            args = MagicMock(note_id="n1", title=None, content_file=None)
-            cmd_update(args)
-            inst.update_note_content.assert_called_once()
-            call_content = inst.update_note_content.call_args[0][1]
-            assert "Updated via stdin" in call_content
 
 
 class TestCmdListJson:
