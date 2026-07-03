@@ -19,6 +19,7 @@ from trilium import (
     cmd_note_idea,
     cmd_note_ref,
     cmd_note_til,
+    cmd_note_topics,
     cmd_update,
 )
 
@@ -431,3 +432,50 @@ class TestDelete:
         t.delete_note.assert_called_once_with("n1")
         out = json.loads(capsys.readouterr().out)
         assert out == {"noteId": "n1", "ok": True}
+
+
+class TestNoteTopics:
+    def _topic_notes(self):
+        # 主题节点自身
+        return [
+            {
+                "noteId": "topicPg",
+                "title": "Postgres",
+                "attributes": [
+                    {"name": "topicNote", "value": "til:Postgres"},
+                ],
+            },
+            {
+                "noteId": "topicRust",
+                "title": "Rust",
+                "attributes": [
+                    {"name": "topicNote", "value": "idea:Rust"},
+                ],
+            },
+        ]
+
+    def test_topics_lists_and_counts(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+
+        def _search(expr, **_):
+            if "#topicNote" in expr:
+                return self._topic_notes()
+            # count queries: match by #knowledge #type=X #topic=Y
+            if 'topic="Postgres"' in expr:
+                return [{"noteId": "n1"}, {"noteId": "n2"}]
+            if 'topic="Rust"' in expr:
+                return [{"noteId": "n3"}]
+            return []
+
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.search.side_effect = _search
+            args = Namespace()
+            cmd_note_topics(args)
+
+        out = json.loads(capsys.readouterr().out)
+        topics = sorted(out["topics"], key=lambda x: x["topic"])
+        assert topics == [
+            {"type": "til", "topic": "Postgres", "noteId": "topicPg", "count": 2},
+            {"type": "idea", "topic": "Rust", "noteId": "topicRust", "count": 1},
+        ]

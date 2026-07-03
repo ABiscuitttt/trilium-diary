@@ -574,6 +574,32 @@ def cmd_note_ref(args) -> None:
     _cmd_note_write(args, "ref")
 
 
+def cmd_note_topics(args):
+    cfg = load_config()
+    t = Trilium(cfg)
+    hits = t.search("#topicNote", limit="1000")
+    topics = []
+    for n in hits:
+        key = next(
+            (a["value"] for a in n.get("attributes", []) if a["name"] == "topicNote"),
+            "",
+        )
+        if ":" not in key:
+            continue
+        type_key, topic = key.split(":", 1)
+        cnt_hits = t.search(
+            f'#knowledge #type="{type_key}" #topic="{topic}"',
+            limit="1000",
+        )
+        topics.append({
+            "type": type_key,
+            "topic": topic,
+            "noteId": n.get("noteId"),
+            "count": len(cnt_hits),
+        })
+    print(json.dumps({"topics": topics}, ensure_ascii=False))
+
+
 def cmd_recap(args):
     from jsonl_render import EmptyTranscriptError, render_jsonl
 
