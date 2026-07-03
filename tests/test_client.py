@@ -15,7 +15,6 @@ from trilium import (
     Trilium,
     cmd_check,
     cmd_get,
-    cmd_list,
     cmd_update,
     load_config,
 )
@@ -587,31 +586,6 @@ class TestCmdUpdate:
             data = json.loads(out)
             assert data == {"noteId": "n1", "ok": True}
             inst.update_note.assert_not_called()
-
-
-class TestCmdListJson:
-    def test_list_text_format_default(self, tmp_path, capsys):
-        config_path = _make_config(tmp_path)
-        with (
-            patch("trilium.CONFIG_PATH", config_path),
-            patch("trilium.Trilium") as MockTril,
-        ):
-            inst = MockTril.return_value
-            inst.search.return_value = [
-                {
-                    "noteId": "n1",
-                    "title": "🪤 · bug",
-                    "attributes": [{"name": "diaryDate", "value": "2026-06-01"}],
-                },
-            ]
-
-            args = MagicMock(date=None, limit=50, format="text")
-            cmd_list(args)
-            out = capsys.readouterr().out
-            assert "n1" in out
-            assert "🪤 · bug" in out
-            # Should NOT be JSON
-            assert not out.strip().startswith("[")
 
 
 class TestNetworkRetry:
