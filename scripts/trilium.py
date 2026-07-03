@@ -300,6 +300,26 @@ class Trilium:
             return {"cloned": False, "alreadyPresent": False, "error": str(e)}
         return {"cloned": True, "alreadyPresent": False, "error": None}
 
+    def find_branch(self, note_id: str, parent_id: str) -> str | None:
+        """Return the branchId connecting note_id to parent_id, or None."""
+        note = self.get_note(note_id)
+        branch_ids = note.get("parentBranchIds") or []
+        parent_ids = note.get("parentNoteIds") or []
+        for bid, pid in zip(branch_ids, parent_ids):
+            if pid == parent_id:
+                return bid
+        return None
+
+    def delete_branch(self, branch_id: str):
+        return self._req("DELETE", f"/branches/{branch_id}")
+
+    def create_branch(self, note_id: str, parent_id: str):
+        return self._req(
+            "POST",
+            "/branches",
+            json={"noteId": note_id, "parentNoteId": parent_id},
+        ).json()
+
     def _child_with_label(self, parent_id, label, value):
         """Find a direct child of parent_id carrying #label=value (calendar key)."""
         expr = f'note.parents.noteId="{parent_id}" #{label}="{value}"'
@@ -598,6 +618,60 @@ def cmd_note_topics(args):
             "count": len(cnt_hits),
         })
     print(json.dumps({"topics": topics}, ensure_ascii=False))
+
+
+def cmd_note_merge_topic(args):
+    cfg = load_config()
+    t = Trilium(cfg)
+
+    if args.type not in TYPE_DISPLAY_NAMES:
+        die(f"未知的知识笔记类型: {args.type!r}")
+    if args.from_topic == args.to_topic:
+        die("源主题与目标主题相同")
+
+    src_notes = t.search(
+        f'#knowledge #type="{args.type}" #topic="{args.from_topic}"',
+        limit="1000",
+    )
+    src_topic_hits = t.search(
+        f'#topicNote="{args.type}:{args.from_topic}"',
+        limit="5",
+    )
+    src_topic_id = src_topic_hits[0]["noteId"] if src_topic_hits else None
+
+    dst_topic_id = t.ensure_topic_path(args.type, args.to_topic)
+
+    moved = 0
+    for n in src_notes:
+        topic_attr = next(
+            (a for a in n.get("attributes", []) if a["name"] == "topic"),
+            None,
+        )
+        if topic_attr:
+            t.patch_attribute(topic_attr["attributeId"], value=args.to_topic)
+        if src_topic_id:
+            bid = t.find_branch(n["noteId"], src_topic_id)
+            if bid:
+                t.delete_branch(bid)
+        t.create_branch(n["noteId"], dst_topic_id)
+        moved += 1
+
+    from_empty = False
+    if src_topic_id:
+        remaining = t.search(
+            f'#knowledge #type="{args.type}" #topic="{args.from_topic}"',
+            limit="1",
+        )
+        if not remaining:
+            t.delete_note(src_topic_id)
+            from_empty = True
+
+    print(json.dumps({
+        "moved": moved,
+        "fromNoteId": src_topic_id or "",
+        "toNoteId": dst_topic_id,
+        "fromEmpty": from_empty,
+    }, ensure_ascii=False))
 
 
 def cmd_recap(args):

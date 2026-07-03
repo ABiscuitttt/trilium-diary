@@ -407,6 +407,16 @@ class TestTriliumClient:
         assert result["alreadyPresent"] is False
         assert "boom" in result["error"] or result["error"]
 
+    def test_find_branch_matches_parent(self):
+        t = self._client()
+        note = {
+            "parentBranchIds": ["b1", "b2"],
+            "parentNoteIds": ["pA", "pB"],
+        }
+        with patch.object(t, "get_note", return_value=note):
+            assert t.find_branch("n", "pB") == "b2"
+            assert t.find_branch("n", "pZ") is None
+
 
 # ---------------------------------------------------------------------------
 # Command-level integration tests (mocked Trilium + config)

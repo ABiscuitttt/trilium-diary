@@ -17,6 +17,7 @@ from trilium import (
     cmd_get,
     cmd_list,
     cmd_note_idea,
+    cmd_note_merge_topic,
     cmd_note_ref,
     cmd_note_til,
     cmd_note_topics,
@@ -479,3 +480,68 @@ class TestNoteTopics:
             {"type": "til", "topic": "Postgres", "noteId": "topicPg", "count": 2},
             {"type": "idea", "topic": "Rust", "noteId": "topicRust", "count": 1},
         ]
+
+
+class TestMergeTopic:
+    def test_merge_moves_notes_and_removes_empty_source(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+
+        source_notes = [
+            {
+                "noteId": "n1",
+                "attributes": [
+                    {"attributeId": "at1", "name": "topic", "value": "OldPg"},
+                ],
+            },
+            {
+                "noteId": "n2",
+                "attributes": [
+                    {"attributeId": "at2", "name": "topic", "value": "OldPg"},
+                ],
+            },
+        ]
+        source_topic_hits = [
+            {
+                "noteId": "topicOld",
+                "attributes": [{"name": "topicNote", "value": "til:OldPg"}],
+            }
+        ]
+
+        empty_after_move = {"called": False}
+
+        def _search(expr, **_):
+            if "#knowledge" in expr and 'topic="OldPg"' in expr:
+                if empty_after_move["called"]:
+                    return []
+                empty_after_move["called"] = True
+                return source_notes
+            if '#topicNote="til:OldPg"' in expr:
+                return source_topic_hits
+            return []
+
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.search.side_effect = _search
+            t.ensure_topic_path.return_value = "topicNew"
+            t.find_branch.side_effect = ["b1", "b2"]
+
+            args = Namespace(type="til", from_topic="OldPg", to_topic="Postgres")
+            cmd_note_merge_topic(args)
+
+        patch_calls = t.patch_attribute.call_args_list
+        assert any(c.args[0] == "at1" for c in patch_calls)
+        assert any(c.args[0] == "at2" for c in patch_calls)
+        t.ensure_topic_path.assert_called_once_with("til", "Postgres")
+        assert t.delete_branch.call_count == 2
+        assert t.create_branch.call_count == 2
+        t.delete_note.assert_called_once_with("topicOld")
+
+        out = json.loads(capsys.readouterr().out)
+        assert out == {
+            "moved": 2,
+            "fromNoteId": "topicOld",
+            "toNoteId": "topicNew",
+            "fromEmpty": True,
+        }
