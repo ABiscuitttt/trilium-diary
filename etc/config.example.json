@@ -1,5 +1,6 @@
 {
-  "server": "http://your-trilium-server",
-  "token": "your-etapi-token",
-  "calendarRootId": "your-calendar-root-note-id"
+  "server": "http://trilium.localhost",
+  "token": "<ETAPI token>",
+  "calendarRootId": "",
+  "knowledgeRootId": ""
 }
