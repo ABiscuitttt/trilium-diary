@@ -425,17 +425,27 @@ def cmd_check(args):
     t = Trilium(cfg)
     info = t.app_info()
     print("✓ Trilium 可达: {} (v{})".format(cfg["server"], info.get("appVersion")))
-    root = t.calendar_root()
-    print(f"✓ token 有效，日历根 = {root}")
-    # Verify the root note actually has #calendarRoot
-    root_note = t.get_note(root)
-    has_calendar_root = any(
-        a["name"] == "calendarRoot" for a in root_note.get("attributes", [])
+    print("✓ token 有效")
+
+    cal = t.calendar_root()
+    cal_note = t.get_note(cal)
+    cal_ok = any(a["name"] == "calendarRoot" for a in cal_note.get("attributes", []))
+    tag = "#calendarRoot 标签存在" if cal_ok else "⚠ 缺少 #calendarRoot 标签"
+    print(f"✓ 日历根 = {cal}（{tag}）")
+
+    know = t.knowledge_root()
+    know_note = t.get_note(know)
+    know_ok = any(
+        a["name"] == "knowledgeRoot" for a in know_note.get("attributes", [])
     )
-    if has_calendar_root:
-        print("✓ 日历根笔记验证通过（#calendarRoot 标签存在）")
-    else:
-        print("⚠️  日历根笔记缺少 #calendarRoot 标签，日历功能可能异常")
+    tag = "#knowledgeRoot 标签存在" if know_ok else "⚠ 缺少 #knowledgeRoot 标签"
+    print(f"✓ 知识根 = {know}（{tag}）")
+
+    for type_key in ("til", "idea", "ref"):
+        hits = t.search(f'#typeNote="{type_key}"', limit="5")
+        display = TYPE_DISPLAY_NAMES[type_key]
+        status = "存在" if hits else "首次写入时自动建"
+        print(f"i {display} 类型节点：{status}")
 
 
 def cmd_list(args):

@@ -802,15 +802,20 @@ class TestCmdCheckEnhanced:
             inst = MockTril.return_value
             inst.app_info.return_value = {"appVersion": "0.63.0"}
             inst.calendar_root.return_value = "abc"
-            inst.get_note.return_value = {
-                "noteId": "abc",
-                "attributes": [{"name": "calendarRoot", "value": ""}],
-            }
+            inst.knowledge_root.return_value = "know"
+            def _get(nid):
+                if nid == "abc":
+                    return {"attributes": [{"name": "calendarRoot"}]}
+                if nid == "know":
+                    return {"attributes": [{"name": "knowledgeRoot"}]}
+                return {"attributes": []}
+            inst.get_note.side_effect = _get
+            inst.search.return_value = [{"noteId": "n1"}]
             args = MagicMock(cmd="check")
             cmd_check(args)
             out = capsys.readouterr().out
             assert "#calendarRoot" in out
-            assert "验证通过" in out
+            assert "#calendarRoot 标签存在" in out
 
     def test_check_warns_missing_calendar_root_label(self, tmp_path, capsys):
         config_path = _make_config(tmp_path)
@@ -821,10 +826,15 @@ class TestCmdCheckEnhanced:
             inst = MockTril.return_value
             inst.app_info.return_value = {"appVersion": "0.63.0"}
             inst.calendar_root.return_value = "abc"
-            inst.get_note.return_value = {
-                "noteId": "abc",
-                "attributes": [],
-            }
+            inst.knowledge_root.return_value = "know"
+            def _get(nid):
+                if nid == "abc":
+                    return {"attributes": []}
+                if nid == "know":
+                    return {"attributes": []}
+                return {"attributes": []}
+            inst.get_note.side_effect = _get
+            inst.search.return_value = []
             args = MagicMock(cmd="check")
             cmd_check(args)
             out = capsys.readouterr().out
