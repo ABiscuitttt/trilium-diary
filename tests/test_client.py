@@ -359,6 +359,53 @@ class TestTriliumClient:
         with pytest.raises(SystemExit):
             t.ensure_topic_path("til", "")
 
+    def test_clone_note_creates_branch(self):
+        t = self._client()
+        with (
+            patch.object(
+                t, "get_note", return_value={"parentNoteIds": ["topicA"]}
+            ),
+            patch.object(t, "_req") as req_call,
+        ):
+            req_call.return_value = MagicMock()
+            result = t.clone_note("noteX", "dayY")
+
+        assert result == {"cloned": True, "alreadyPresent": False, "error": None}
+        req_call.assert_called_once()
+        method, path = req_call.call_args.args[0], req_call.call_args.args[1]
+        assert method == "POST"
+        assert path == "/branches"
+        payload = req_call.call_args.kwargs["json"]
+        assert payload == {"noteId": "noteX", "parentNoteId": "dayY"}
+
+    def test_clone_note_already_present(self):
+        t = self._client()
+        with (
+            patch.object(
+                t, "get_note", return_value={"parentNoteIds": ["topicA", "dayY"]}
+            ),
+            patch.object(t, "_req") as req_call,
+        ):
+            result = t.clone_note("noteX", "dayY")
+
+        assert result == {"cloned": True, "alreadyPresent": True, "error": None}
+        req_call.assert_not_called()
+
+    def test_clone_note_http_error_does_not_die(self):
+        t = self._client()
+        with (
+            patch.object(
+                t, "get_note", return_value={"parentNoteIds": ["topicA"]}
+            ),
+            patch.object(t, "_req", side_effect=SystemExit("boom")),
+        ):
+            # clone_note swallows _req's die/SystemExit into structured error
+            result = t.clone_note("noteX", "dayY")
+
+        assert result["cloned"] is False
+        assert result["alreadyPresent"] is False
+        assert "boom" in result["error"] or result["error"]
+
 
 # ---------------------------------------------------------------------------
 # Command-level integration tests (mocked Trilium + config)

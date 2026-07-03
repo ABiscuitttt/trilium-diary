@@ -279,6 +279,27 @@ class Trilium:
         self.add_label(nid, "iconClass", TOPIC_FOLDER_ICON)
         return nid
 
+    def clone_note(self, note_id: str, parent_id: str) -> dict:
+        """Attach note_id as an additional child of parent_id (idempotent).
+
+        Uses ETAPI POST /branches. Returns a structured result; never dies.
+        """
+        try:
+            note = self.get_note(note_id)
+        except SystemExit as e:
+            return {"cloned": False, "alreadyPresent": False, "error": str(e)}
+        if parent_id in (note.get("parentNoteIds") or []):
+            return {"cloned": True, "alreadyPresent": True, "error": None}
+        try:
+            self._req(
+                "POST",
+                "/branches",
+                json={"noteId": note_id, "parentNoteId": parent_id},
+            )
+        except SystemExit as e:
+            return {"cloned": False, "alreadyPresent": False, "error": str(e)}
+        return {"cloned": True, "alreadyPresent": False, "error": None}
+
     def _child_with_label(self, parent_id, label, value):
         """Find a direct child of parent_id carrying #label=value (calendar key)."""
         expr = f'note.parents.noteId="{parent_id}" #{label}="{value}"'
