@@ -1,7 +1,7 @@
 [project]
 name = "trilium-diary"
-version = "2.0.0"
-description = "把当前 Claude Code 会话的对话 JSONL 忠实渲染成 markdown，写入 Trilium 日历面板"
+version = "3.0.0"
+description = "通用 Trilium 知识笔记助手：把 Claude Code 会话里的 TIL / 想法 / 参考资料写入分类树 + 日历双入口"
 requires-python = ">=3.12"
 dependencies = [
     "markdown>=3.5",
