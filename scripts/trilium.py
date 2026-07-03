@@ -505,7 +505,7 @@ def cmd_update(args):
             html = render_markdown(md)
             t.update_note_content(args.note_id, html)
 
-    if args.icon is not None:
+    if args.icon:
         note = t.get_note(args.note_id)
         existing = next(
             (a for a in note.get("attributes", []) if a["name"] == "iconClass"),

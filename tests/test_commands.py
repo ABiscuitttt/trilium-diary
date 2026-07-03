@@ -403,3 +403,18 @@ class TestUpdate:
             cmd_update(args)
         t.add_label.assert_called_once_with("n1", "iconClass", "bx bx-cog")
         t.patch_attribute.assert_not_called()
+
+    def test_update_icon_empty_string_is_noop(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        fake = io.StringIO("")
+        fake.isatty = lambda: True
+        monkeypatch.setattr("sys.stdin", fake)
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            args = Namespace(note_id="n1", title=None, icon="")
+            cmd_update(args)
+        t.get_note.assert_not_called()
+        t.patch_attribute.assert_not_called()
+        t.add_label.assert_not_called()
