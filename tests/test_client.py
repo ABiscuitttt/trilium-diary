@@ -355,6 +355,13 @@ class TestTriliumClient:
         with pytest.raises(SystemExit):
             t.ensure_topic_path("til", "")
 
+    def test_ensure_topic_path_rejects_injection(self):
+        t = self._client()
+        with pytest.raises(SystemExit):
+            t.ensure_topic_path("til", 'Bad"Topic')
+        with pytest.raises(SystemExit):
+            t.ensure_topic_path("til", "Multi\nLine")
+
     def test_clone_note_creates_branch(self):
         t = self._client()
         with (

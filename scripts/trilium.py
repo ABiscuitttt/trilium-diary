@@ -22,6 +22,7 @@ import argparse
 import datetime as _dt
 import json
 import os
+import re
 import sys
 
 import markdown
@@ -75,6 +76,27 @@ MD_EXTENSION_CONFIGS = {"codehilite": {"noclasses": True}}
 def die(msg, code=1):
     print(msg, file=sys.stderr)
     sys.exit(code)
+
+
+# Allow unicode word chars (incl. CJK), digits, and a safe set of punctuation.
+# Explicitly excludes: " \ newline tab # < > = and other control chars.
+_ETAPI_VALUE_RE = re.compile(r'^[\w\-.:/+ ]*$')
+
+
+def _safe_etapi_value(name: str, value: str) -> str:
+    """Validate a value going into an ETAPI search expression.
+
+    ETAPI search expressions use double-quoted literals; unescaped quotes,
+    backslashes, or newlines break parsing or open injection.
+    Returns the value unchanged if safe; calls die() otherwise.
+    """
+    if not isinstance(value, str):
+        die(f"{name} 必须是字符串，收到: {type(value).__name__}")
+    if not _ETAPI_VALUE_RE.match(value):
+        die(
+            f"{name} 含非法字符（应只含字母/数字/中文/`-._:/+ `）: {value!r}"
+        )
+    return value
 
 
 def load_config():
@@ -275,7 +297,10 @@ class Trilium:
 
     def _child_with_label(self, parent_id, label, value):
         """Find a direct child of parent_id carrying #label=value (calendar key)."""
-        expr = f'note.parents.noteId="{parent_id}" #{label}="{value}"'
+        expr = (
+            f'note.parents.noteId="{_safe_etapi_value("parent_id", parent_id)}"'
+            f' #{label}="{_safe_etapi_value(label, value)}"'
+        )
         for n in self.search(expr, limit="30"):
             if parent_id in (n.get("parentNoteIds") or []) and any(
                 a["name"] == label and a["value"] == value
@@ -373,7 +398,8 @@ def cmd_check(args):
     print(f"✓ 知识根 = {know}（{tag}）")
 
     for type_key in ("til", "idea", "ref"):
-        hits = t.search(f'#typeNote="{type_key}"', limit="5")
+        safe_key = _safe_etapi_value("type_key", type_key)
+        hits = t.search(f'#typeNote="{safe_key}"', limit="5")
         display = TYPE_DISPLAY_NAMES[type_key]
         status = "存在" if hits else "首次写入时自动建"
         print(f"i {display} 类型节点：{status}")
@@ -385,13 +411,14 @@ def cmd_list(args):
 
     parts = ["#knowledge"]
     if args.type:
-        parts.append(f'#type="{args.type}"')
+        parts.append(f'#type="{_safe_etapi_value("type", args.type)}"')
     if args.topic:
-        parts.append(f'#topic="{args.topic}"')
+        parts.append(f'#topic="{_safe_etapi_value("topic", args.topic)}"')
     if args.note_date:
-        parts.append(f'#noteDate="{args.note_date}"')
+        parts.append(f'#noteDate="{_safe_etapi_value("note_date", args.note_date)}"')
     if args.source_session:
-        parts.append(f'#sourceSession="{args.source_session}"')
+        safe_sess = _safe_etapi_value("source_session", args.source_session)
+        parts.append(f'#sourceSession="{safe_sess}"')
     expr = " ".join(parts)
 
     rows = t.search(
@@ -549,7 +576,9 @@ def cmd_note_topics(args):
             continue
         type_key, topic = key.split(":", 1)
         cnt_hits = t.search(
-            f'#knowledge #type="{type_key}" #topic="{topic}"',
+            "#knowledge"
+            f' #type="{_safe_etapi_value("type_key", type_key)}"'
+            f' #topic="{_safe_etapi_value("topic", topic)}"',
             limit="1000",
         )
         topics.append({
@@ -571,11 +600,15 @@ def cmd_note_merge_topic(args):
         die("源主题与目标主题相同")
 
     src_notes = t.search(
-        f'#knowledge #type="{args.type}" #topic="{args.from_topic}"',
+        "#knowledge"
+        f' #type="{_safe_etapi_value("type", args.type)}"'
+        f' #topic="{_safe_etapi_value("from_topic", args.from_topic)}"',
         limit="1000",
     )
     src_topic_hits = t.search(
-        f'#topicNote="{args.type}:{args.from_topic}"',
+        f'#topicNote='
+        f'"{_safe_etapi_value("type", args.type)}'
+        f':{_safe_etapi_value("from_topic", args.from_topic)}"',
         limit="5",
     )
     src_topic_id = src_topic_hits[0]["noteId"] if src_topic_hits else None
@@ -600,7 +633,9 @@ def cmd_note_merge_topic(args):
     from_empty = False
     if src_topic_id:
         remaining = t.search(
-            f'#knowledge #type="{args.type}" #topic="{args.from_topic}"',
+            "#knowledge"
+            f' #type="{_safe_etapi_value("type", args.type)}"'
+            f' #topic="{_safe_etapi_value("from_topic", args.from_topic)}"',
             limit="1",
         )
         if not remaining:
