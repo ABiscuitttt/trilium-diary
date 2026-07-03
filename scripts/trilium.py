@@ -438,7 +438,10 @@ def cmd_check(args):
     know_ok = any(
         a["name"] == "knowledgeRoot" for a in know_note.get("attributes", [])
     )
-    tag = "#knowledgeRoot 标签存在" if know_ok else "⚠ 缺少 #knowledgeRoot 标签"
+    tag = (
+        "#knowledgeRoot 标签存在" if know_ok
+        else "⚠ 缺少 #knowledgeRoot 标签"
+    )
     print(f"✓ 知识根 = {know}（{tag}）")
 
     for type_key in ("til", "idea", "ref"):
