@@ -476,24 +476,20 @@ def cmd_get(args):
     cfg = load_config()
     t = Trilium(cfg)
     note = t.get_note(args.note_id)
-    title = note.get("title", "")
-    diary_type = _get_attr_value(note, "diaryType")
-    diary_date = _get_attr_value(note, "diaryDate")
-
-    print(f"标题: {title}")
-    if diary_type:
-        print(f"类型: {diary_type}")
-    if diary_date:
-        print(f"日期: {diary_date}")
-    print(f"noteId: {note.get('noteId', '')}")
-    url = "{}/#root/{}".format(cfg["server"], args.note_id)
-    print(f"打开: {url}")
-
+    attrs = {a["name"]: a["value"] for a in note.get("attributes", [])}
+    out = {
+        "noteId": note.get("noteId", args.note_id),
+        "title": note.get("title", ""),
+        "type": attrs.get("type", ""),
+        "topic": attrs.get("topic", ""),
+        "noteDate": attrs.get("noteDate", ""),
+        "sourceSession": attrs.get("sourceSession", ""),
+        "iconClass": attrs.get("iconClass", ""),
+        "url": _note_url(cfg, args.note_id),
+    }
     if args.content:
-        content = t.get_note_content(args.note_id)
-        if content:
-            print("---")
-            print(content)
+        out["content"] = t.get_note_content(args.note_id)
+    print(json.dumps(out, ensure_ascii=False))
 
 
 def cmd_update(args):

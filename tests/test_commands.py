@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from trilium import (
     TYPE_DEFAULT_ICONS,
+    cmd_get,
     cmd_list,
     cmd_note_idea,
     cmd_note_ref,
@@ -279,3 +280,52 @@ class TestList:
             cmd_list(args)
         out = json.loads(capsys.readouterr().out)
         assert out == {"items": []}
+
+
+class TestGet:
+    def _note(self):
+        return {
+            "noteId": "n1",
+            "title": "TIL: tz",
+            "attributes": [
+                {"name": "type", "value": "til"},
+                {"name": "topic", "value": "Postgres"},
+                {"name": "noteDate", "value": "2026-07-03"},
+                {"name": "sourceSession", "value": "sess-1"},
+                {"name": "iconClass", "value": "bx bx-data"},
+            ],
+        }
+
+    def test_get_returns_metadata_json(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.get_note.return_value = self._note()
+            args = Namespace(note_id="n1", content=False)
+            cmd_get(args)
+        out = json.loads(capsys.readouterr().out)
+        assert out == {
+            "noteId": "n1",
+            "title": "TIL: tz",
+            "type": "til",
+            "topic": "Postgres",
+            "noteDate": "2026-07-03",
+            "sourceSession": "sess-1",
+            "iconClass": "bx bx-data",
+            "url": "http://localhost:8080/#root/n1",
+        }
+
+    def test_get_with_content_adds_content_field(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.get_note.return_value = self._note()
+            t.get_note_content.return_value = "<p>body</p>"
+            args = Namespace(note_id="n1", content=True)
+            cmd_get(args)
+        out = json.loads(capsys.readouterr().out)
+        assert out["content"] == "<p>body</p>"
