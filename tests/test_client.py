@@ -327,6 +327,38 @@ class TestTriliumClient:
         with pytest.raises(SystemExit):
             t.ensure_type_path("bogus")
 
+    def test_ensure_topic_path_existing(self):
+        t = self._client()
+        with (
+            patch.object(t, "ensure_type_path", return_value="tilNode"),
+            patch.object(t, "_child_with_label", return_value="pgTopic"),
+        ):
+            assert t.ensure_topic_path("til", "Postgres") == "pgTopic"
+
+    def test_ensure_topic_path_creates_with_folder_icon(self):
+        from trilium import TOPIC_FOLDER_ICON
+
+        t = self._client()
+        with (
+            patch.object(t, "ensure_type_path", return_value="tilNode"),
+            patch.object(t, "_child_with_label", return_value=None),
+            patch.object(
+                t, "create_note", return_value={"note": {"noteId": "newTopic"}}
+            ) as create_call,
+            patch.object(t, "add_label") as add_call,
+        ):
+            assert t.ensure_topic_path("til", "Postgres") == "newTopic"
+
+        create_call.assert_called_once_with("tilNode", "Postgres", "")
+        labels = {c.args[1]: c.args[2] for c in add_call.call_args_list}
+        assert labels["topicNote"] == "til:Postgres"
+        assert labels["iconClass"] == TOPIC_FOLDER_ICON
+
+    def test_ensure_topic_path_rejects_empty_topic(self):
+        t = self._client()
+        with pytest.raises(SystemExit):
+            t.ensure_topic_path("til", "")
+
 
 # ---------------------------------------------------------------------------
 # Command-level integration tests (mocked Trilium + config)

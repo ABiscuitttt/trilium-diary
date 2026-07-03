@@ -264,6 +264,21 @@ class Trilium:
         self.add_label(nid, "iconClass", TYPE_DEFAULT_ICONS[type_key])
         return nid
 
+    def ensure_topic_path(self, type_key: str, topic: str) -> str:
+        """Find-or-create `Knowledge/<Type>/<Topic>/`; return its noteId."""
+        if not topic or not topic.strip():
+            die("主题名不能为空")
+        topic = topic.strip()
+        type_node = self.ensure_type_path(type_key)
+        key = f"{type_key}:{topic}"
+        found = self._child_with_label(type_node, "topicNote", key)
+        if found:
+            return found
+        nid = self.create_note(type_node, topic, "")["note"]["noteId"]
+        self.add_label(nid, "topicNote", key)
+        self.add_label(nid, "iconClass", TOPIC_FOLDER_ICON)
+        return nid
+
     def _child_with_label(self, parent_id, label, value):
         """Find a direct child of parent_id carrying #label=value (calendar key)."""
         expr = f'note.parents.noteId="{parent_id}" #{label}="{value}"'
