@@ -43,12 +43,14 @@ chmod 600 etc/config.json
 
 ## 使用（在 Claude Code 里）
 
-- `记个 TIL，Postgres timestamp 和 timestamptz 存储上一样` → subagent 写一条 TIL
+- `记个 TIL，Postgres timestamp 和 timestamptz 的时区语义不同` → subagent 写一条 TIL
 - `整理一下这次会话` → subagent 从整段 session 挑候选逐条落盘
 - `看看今天记了什么` → 主 Claude 直接调 CLI
 - `改标题为 X` / `合并主题 PostgreSQL 到 Postgres` / `删了 abc` → 主 Claude 直接调 CLI
 
 写入笔记的类型、主题、标题、正文、图标由 subagent 自动判定，落到 Trilium 后可用 `update` / `delete` / `note merge-topic` 修正。
+
+写入质量由 `references/note-triage-rules.md` 约束：可搜索标题、首句结论、压缩背景、证据 / 来源、写入前自检；宁可跳过也不写会话摘要。
 
 ## 命令
 
@@ -81,5 +83,5 @@ Python 3.12+，通过 [uv](https://docs.astral.sh/uv/) 自动管理（`markdown`
 
 - `SKILL.md`：Claude Code 触发协议
 - `agents/note-taker.md`：subagent 指令
-- `references/note-triage-rules.md`：类型 / 主题 / 标题 / 图标规则
+- `references/note-triage-rules.md`：笔记质量规则（类型 / 主题 / 标题 / 正文 / 图标 / 自检）
 - `references/etapi.md`：Trilium ETAPI 参考

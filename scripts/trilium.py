@@ -115,7 +115,7 @@ def load_config():
 
 
 class Trilium:
-    """ETAPI client scoped to the diary-into-calendar use case."""
+    """ETAPI client scoped to knowledge notes with Journal clones."""
 
     def __init__(self, cfg):
         self.base = cfg["server"] + "/etapi"
@@ -415,7 +415,8 @@ def cmd_list(args):
     if args.topic:
         parts.append(f'#topic="{_safe_etapi_value("topic", args.topic)}"')
     if args.note_date:
-        parts.append(f'#noteDate="{_safe_etapi_value("note_date", args.note_date)}"')
+        note_date = parse_date(args.note_date).isoformat()
+        parts.append(f'#noteDate="{_safe_etapi_value("note_date", note_date)}"')
     if args.source_session:
         safe_sess = _safe_etapi_value("source_session", args.source_session)
         parts.append(f'#sourceSession="{safe_sess}"')
@@ -430,13 +431,15 @@ def cmd_list(args):
     items = []
     for n in rows:
         attrs = {a["name"]: a["value"] for a in n.get("attributes", [])}
+        note_id = n.get("noteId", "")
         items.append({
-            "noteId": n.get("noteId"),
+            "noteId": note_id,
             "title": n.get("title"),
             "type": attrs.get("type", ""),
             "topic": attrs.get("topic", ""),
             "noteDate": attrs.get("noteDate", ""),
             "sourceSession": attrs.get("sourceSession", ""),
+            "url": _note_url(cfg, note_id),
         })
     print(json.dumps({"items": items}, ensure_ascii=False))
 
@@ -465,6 +468,8 @@ def cmd_get(args):
         "iconClass": attrs.get("iconClass", ""),
         "url": _note_url(cfg, args.note_id),
     }
+    if attrs.get("url"):
+        out["sourceUrl"] = attrs["url"]
     if args.content:
         out["content"] = t.get_note_content(args.note_id)
     print(json.dumps(out, ensure_ascii=False))
@@ -511,26 +516,31 @@ def _read_stdin_markdown() -> str:
 
 
 def _cmd_note_write(args, type_key: str) -> None:
+    md = _read_stdin_markdown()
+    date = parse_date(args.note_date)
+    note_date = date.isoformat()
+    topic = args.topic.strip()
+    if not topic:
+        die("主题名不能为空")
+
     cfg = load_config()
     t = Trilium(cfg)
 
-    md = _read_stdin_markdown()
     html = render_markdown(md)
 
-    topic_id = t.ensure_topic_path(type_key, args.topic)
+    topic_id = t.ensure_topic_path(type_key, topic)
     nid = t.create_note(topic_id, args.title, html, ntype="text")["note"]["noteId"]
 
     icon = args.icon if args.icon else TYPE_DEFAULT_ICONS[type_key]
     t.add_label(nid, "knowledge", "")
     t.add_label(nid, "type", type_key)
-    t.add_label(nid, "topic", args.topic)
+    t.add_label(nid, "topic", topic)
     t.add_label(nid, "sourceSession", args.source_session)
-    t.add_label(nid, "noteDate", args.note_date)
+    t.add_label(nid, "noteDate", note_date)
     t.add_label(nid, "iconClass", icon)
     if type_key == "ref":
         t.add_label(nid, "url", args.url)
 
-    date = parse_date(args.note_date)
     day_id = t.ensure_date_path(date)
     clone = t.clone_note(nid, day_id)
 
@@ -596,24 +606,28 @@ def cmd_note_merge_topic(args):
 
     if args.type not in TYPE_DISPLAY_NAMES:
         die(f"未知的知识笔记类型: {args.type!r}（应为 til/idea/ref）")
-    if args.from_topic == args.to_topic:
+    from_topic = args.from_topic.strip()
+    to_topic = args.to_topic.strip()
+    if not from_topic or not to_topic:
+        die("主题名不能为空")
+    if from_topic == to_topic:
         die("源主题与目标主题相同")
 
     src_notes = t.search(
         "#knowledge"
         f' #type="{_safe_etapi_value("type", args.type)}"'
-        f' #topic="{_safe_etapi_value("from_topic", args.from_topic)}"',
+        f' #topic="{_safe_etapi_value("from_topic", from_topic)}"',
         limit="1000",
     )
     src_topic_hits = t.search(
         f'#topicNote='
         f'"{_safe_etapi_value("type", args.type)}'
-        f':{_safe_etapi_value("from_topic", args.from_topic)}"',
+        f':{_safe_etapi_value("from_topic", from_topic)}"',
         limit="5",
     )
     src_topic_id = src_topic_hits[0]["noteId"] if src_topic_hits else None
 
-    dst_topic_id = t.ensure_topic_path(args.type, args.to_topic)
+    dst_topic_id = t.ensure_topic_path(args.type, to_topic)
 
     moved = 0
     for n in src_notes:
@@ -622,7 +636,7 @@ def cmd_note_merge_topic(args):
             None,
         )
         if topic_attr:
-            t.patch_attribute(topic_attr["attributeId"], value=args.to_topic)
+            t.patch_attribute(topic_attr["attributeId"], value=to_topic)
         if src_topic_id:
             bid = t.find_branch(n["noteId"], src_topic_id)
             if bid:
@@ -635,7 +649,7 @@ def cmd_note_merge_topic(args):
         remaining = t.search(
             "#knowledge"
             f' #type="{_safe_etapi_value("type", args.type)}"'
-            f' #topic="{_safe_etapi_value("from_topic", args.from_topic)}"',
+            f' #topic="{_safe_etapi_value("from_topic", from_topic)}"',
             limit="1",
         )
         if not remaining:

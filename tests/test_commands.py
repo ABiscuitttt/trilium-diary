@@ -111,6 +111,86 @@ class TestNoteTilHappyPath:
         )
         assert icon_val == "bx bx-data"
 
+    def test_normalizes_topic_label_to_match_topic_path(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        monkeypatch.setattr("sys.stdin", io.StringIO("body"))
+
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.ensure_topic_path.return_value = "topic"
+            t.ensure_date_path.return_value = "day"
+            t.create_note.return_value = {"note": {"noteId": "n1"}}
+            t.clone_note.return_value = {
+                "cloned": True, "alreadyPresent": False, "error": None,
+            }
+
+            args = Namespace(
+                topic="  Postgres  ",
+                title="TIL: tz",
+                source_session="s",
+                note_date="2026-07-03",
+                icon=None,
+            )
+            cmd_note_til(args)
+
+        t.ensure_topic_path.assert_called_once_with("til", "Postgres")
+        topic_val = next(
+            c.args[2] for c in t.add_label.call_args_list if c.args[1] == "topic"
+        )
+        assert topic_val == "Postgres"
+
+    def test_invalid_note_date_fails_before_writing(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        monkeypatch.setattr("sys.stdin", io.StringIO("body"))
+
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            args = Namespace(
+                topic="Postgres",
+                title="TIL: tz",
+                source_session="s",
+                note_date="not-a-date",
+                icon=None,
+            )
+            with pytest.raises(SystemExit):
+                cmd_note_til(args)
+
+        t.ensure_topic_path.assert_not_called()
+        t.create_note.assert_not_called()
+
+    def test_note_date_label_is_canonical_isoformat(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
+        monkeypatch.setattr("sys.stdin", io.StringIO("body"))
+
+        with patch("trilium.Trilium") as TClass:
+            t = TClass.return_value
+            t.ensure_topic_path.return_value = "topic"
+            t.ensure_date_path.return_value = "day"
+            t.create_note.return_value = {"note": {"noteId": "n1"}}
+            t.clone_note.return_value = {
+                "cloned": True, "alreadyPresent": False, "error": None,
+            }
+
+            args = Namespace(
+                topic="Postgres",
+                title="TIL: tz",
+                source_session="s",
+                note_date="2026-7-3",
+                icon=None,
+            )
+            cmd_note_til(args)
+
+        note_date_val = next(
+            c.args[2] for c in t.add_label.call_args_list if c.args[1] == "noteDate"
+        )
+        assert note_date_val == "2026-07-03"
+
     def test_empty_stdin_dies(self, tmp_path, monkeypatch):
         monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
         monkeypatch.setattr("sys.stdin", io.StringIO("   \n\n"))
@@ -251,6 +331,7 @@ class TestList:
         assert first["topic"] == "Postgres"
         assert first["noteDate"] == "2026-07-03"
         assert first["sourceSession"] == "sess-1"
+        assert first["url"] == "http://localhost:8080/#root/n1"
 
     def test_list_filters_compose(self, tmp_path, capsys, monkeypatch):
         monkeypatch.setattr("trilium.CONFIG_PATH", _make_config(tmp_path))
@@ -297,6 +378,7 @@ class TestGet:
                 {"name": "noteDate", "value": "2026-07-03"},
                 {"name": "sourceSession", "value": "sess-1"},
                 {"name": "iconClass", "value": "bx bx-data"},
+                {"name": "url", "value": "https://example.com/ref"},
             ],
         }
 
@@ -318,6 +400,7 @@ class TestGet:
             "noteDate": "2026-07-03",
             "sourceSession": "sess-1",
             "iconClass": "bx bx-data",
+            "sourceUrl": "https://example.com/ref",
             "url": "http://localhost:8080/#root/n1",
         }
 
